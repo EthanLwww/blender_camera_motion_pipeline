@@ -232,6 +232,31 @@ def build_suite() -> Suite:
                 else:
                     os.environ[panel_state.ENV_OVERRIDE] = previous
 
+    @suite.case("the sequence resolution round-trips and defaults to the scene's")
+    def _():
+        # ``resolution_explicit`` is what tells the renderer to obey the recorded
+        # size instead of the loaded scene's own resolution.
+        plain = BatchConfig.from_dict({})
+        equal(plain.render.resolution_explicit, False)
+        equal((plain.render.resolution_x, plain.render.resolution_y), (1280, 720))
+        equal("resolution_explicit" in plain.render.to_dict(), True)
+
+        stamped = BatchConfig.from_dict({
+            "render": {"resolution_x": 640, "resolution_y": 360,
+                       "resolution_percentage": 50, "resolution_explicit": True},
+        })
+        equal(stamped.render.resolution_explicit, True)
+        equal(stamped.render.resolution_x, 640)
+        equal(stamped.render.resolution_percentage, 50)
+        # ... and it survives a save/load cycle through JSON.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "config.json")
+            defaults.save_config_file(path, stamped)
+            reloaded = defaults.load_config_file(path)
+            equal(reloaded.render.resolution_explicit, True)
+            equal((reloaded.render.resolution_x, reloaded.render.resolution_y), (640, 360))
+            equal(reloaded.render.resolution_percentage, 50)
+
     @suite.case("combine_frame_ranges merges touching spans")
     def _():
         combined = combine_frame_ranges([(0, 10), (11, 20), (40, 50), (45, 60), (5, 8)])

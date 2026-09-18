@@ -74,6 +74,40 @@ def build_suite() -> Suite:
 
     suite.teardown = teardown
 
+    @suite.case("every icon the UI uses exists in this Blender build")
+    def _():
+        # A wrong icon identifier takes the whole panel down with a wall-of-text
+        # TypeError from RNA (``SEQUENCE_COLOR_02`` did exactly that in the render
+        # list: it is a *strip colour* value, not an icon).  ``UILayout.label``'s
+        # icon enum changes between Blender versions, so every literal in the
+        # package is checked against the build that is running the test.
+        import re
+
+        import bpy
+
+        parameters = bpy.types.UILayout.bl_rna.functions["label"].parameters
+        valid = {item.identifier for item in parameters["icon"].enum_items}
+        ok(len(valid) > 100, f"could not enumerate this build's icons ({len(valid)})")
+
+        package = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        pattern = re.compile(r"""icon\s*=\s*["']([A-Za-z0-9_]+)["']""")
+        seen = 0
+        unknown: "list[str]" = []
+        for folder, dirs, files in os.walk(package):
+            dirs[:] = [d for d in dirs if d != "__pycache__"]
+            for name in sorted(files):
+                if not name.endswith(".py"):
+                    continue
+                path = os.path.join(folder, name)
+                with open(path, encoding="utf-8") as handle:
+                    for number, line in enumerate(handle, start=1):
+                        for match in pattern.finditer(line):
+                            seen += 1
+                            if match.group(1) not in valid:
+                                unknown.append(f"{name}:{number} {match.group(1)}")
+        ok(seen > 20, f"expected to find icon literals in the package, saw {seen}")
+        equal(unknown, [], "icon identifier(s) that this Blender build does not know")
+
     @suite.case("register_all is idempotent and unregister_all is clean")
     def _():
         import bpy

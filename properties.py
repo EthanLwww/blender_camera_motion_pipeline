@@ -44,6 +44,29 @@ _PANEL_DEFAULTS = {
     "missing_only": False,
 }
 
+#: Output sizes the panel offers.  The label spells out the pixels, so "1K" never
+#: means two different things to two people; ``scene`` keeps the historical
+#: behaviour of following whatever resolution the source ``.blend`` has, and
+#: ``custom`` shows a size that arrived from a config file or the CLI.
+RESOLUTION_PRESETS = (
+    ("720p", "720p  (1280 x 720)", "HD ready - the pipeline default"),
+    ("1080p", "1080p  (1920 x 1080)", "Full HD"),
+    ("1k", "1K square  (1024 x 1024)", "Square 1K"),
+    ("2k", "2K  (2048 x 1080)", "DCI 2K"),
+    ("4k", "4K  (3840 x 2160)", "Ultra HD"),
+    ("scene", "Follow the source scene", "Render at whatever the source .blend uses"),
+    ("custom", "Custom size (from a config file)", "Set outside the panel"),
+)
+
+#: Preset identifier -> ``(width, height)``.
+RESOLUTION_SIZES = {
+    "720p": (1280, 720),
+    "1080p": (1920, 1080),
+    "1k": (1024, 1024),
+    "2k": (2048, 1080),
+    "4k": (3840, 2160),
+}
+
 #: RNA stores floats in single precision, so ``0.2`` reads back as
 #: ``0.20000000298023224``.  Comparing defaults needs a tolerance.
 _FLOAT_TOLERANCE = 1e-6
@@ -428,6 +451,21 @@ class MPP_SceneProperties(PropertyGroup):
     )
 
     # -- render defaults (recorded for the headless renderer) -------------
+    sequence_resolution: EnumProperty(
+        name="Sequence resolution",
+        description=(
+            "Output size recorded in every sequence, so a headless render uses it "
+            "instead of the source scene's own render resolution"
+        ),
+        items=RESOLUTION_PRESETS,
+        default="720p",
+    )
+    #: The numbers the preset resolves to (and where a config file's custom size
+    #: lands).  Kept on the group so the panel, a saved config and the CLI all
+    #: agree on one representation; the enum above is the user-facing facet.
+    sequence_res_x: IntProperty(name="Width", default=1280, min=16, max=16384)
+    sequence_res_y: IntProperty(name="Height", default=720, min=16, max=16384)
+    sequence_res_percentage: IntProperty(name="Resolution %", default=100, min=1, max=100)
     render_engine: StringProperty(
         name="Engine",
         description="Engine recorded in sequence_config.json for the renderer",
@@ -644,8 +682,39 @@ class MPP_SceneProperties(PropertyGroup):
         config.render.video_format = self.video_format
         config.render.trajectory_mode = self.trajectory_mode
         config.render.trajectory_step = max(1, int(self.trajectory_step))
+        config.render.resolution_explicit = self._resolution_explicit()
+        width, height, percentage = self._resolution_numbers()
+        config.render.resolution_x = width
+        config.render.resolution_y = height
+        config.render.resolution_percentage = percentage
         config.render.output_root = config.batch.output_root
         return config
+
+    def _resolution_explicit(self) -> bool:
+        """Does this sequence dictate its output size?"""
+        return self.sequence_resolution not in ("scene",)
+
+    def _resolution_numbers(self) -> "tuple[int, int, int]":
+        """``(width, height, percentage)`` the current preset stands for."""
+        preset = self.sequence_resolution
+        size = RESOLUTION_SIZES.get(preset)
+        if size is None:
+            # ``scene`` and ``custom`` keep whatever numbers are on the group.
+            return (
+                max(16, int(self.sequence_res_x)),
+                max(16, int(self.sequence_res_y)),
+                max(1, min(100, int(self.sequence_res_percentage))),
+            )
+        return size[0], size[1], 100
+
+    def resolution_summary(self) -> str:
+        """One line for the panel saying what this sequence will render at."""
+        if self.sequence_resolution == "scene":
+            return "Sequences follow the source scene's own resolution."
+        width, height, percentage = self._resolution_numbers()
+        if percentage != 100:
+            return f"Sequences record {width} x {height} at {percentage}% ({int(round(width * percentage / 100))} x {int(round(height * percentage / 100))})."
+        return f"Sequences record {width} x {height}."
 
     def from_config(self, config: BatchConfig) -> None:
         """Push a :class:`BatchConfig` into the panel fields."""
@@ -698,6 +767,30 @@ class MPP_SceneProperties(PropertyGroup):
         self.video_format = config.render.video_format
         self.trajectory_mode = config.render.trajectory_mode
         self.trajectory_step = int(config.render.trajectory_step)
+        self.sequence_res_x = int(config.render.resolution_x)
+        self.sequence_res_y = int(config.render.resolution_y)
+        self.sequence_res_percentage = int(config.render.resolution_percentage)
+        self.sequence_resolution = self._preset_for(
+            bool(config.render.resolution_explicit),
+            self.sequence_res_x,
+            self.sequence_res_y,
+            self.sequence_res_percentage,
+        )
+
+    @staticmethod
+    def _preset_for(explicit: bool, width: int, height: int, percentage: int) -> str:
+        """Which dropdown entry matches a config's resolution.
+
+        A size that matches no preset (a config file or ``--resolution`` wrote it)
+        lands on ``custom``: the panel must not silently rewrite the user's numbers
+        just because they did not come from the dropdown.
+        """
+        if not explicit:
+            return "scene"
+        for name, size in RESOLUTION_SIZES.items():
+            if (int(width), int(height)) == size and int(percentage) == 100:
+                return name
+        return "custom"
 
     # -- helpers ---------------------------------------------------------
     #: Panel-only fields (not part of BatchConfig) that are still "settings".
@@ -708,6 +801,9 @@ class MPP_SceneProperties(PropertyGroup):
         "recursive_scan",
         "scene_list_file",
         "missing_only",
+        # The dropdown selection itself: the numbers travel through BatchConfig, but
+        # "custom" vs "scene" is only expressible here.
+        "sequence_resolution",
     )
     #: Local-render fields worth remembering between runs.
     RENDER_FIELDS = (
@@ -835,6 +931,16 @@ class MPP_SceneProperties(PropertyGroup):
         """
         from .config.defaults import default_config
 
+        #: Keys a fresh panel fills in by itself, so their value says nothing about
+        #: whether the user configured anything: the template path and output folder
+        #: are seeded from preferences, and the sequence resolution is preselected
+        #: (720p) -- without ignoring the latter, every new scene would count as
+        #: "already configured" and the remembered settings would never be applied.
+        seeded = (
+            "template_path", "output_root", "input_root",
+            "resolution_explicit", "resolution_x", "resolution_y", "resolution_percentage",
+        )
+
         if len(self.scene_list):
             return False
         try:
@@ -849,9 +955,7 @@ class MPP_SceneProperties(PropertyGroup):
                     return False
                 continue
             for key, value in values.items():
-                if key in ("template_path", "output_root", "input_root"):
-                    # Seeded from preferences/discovery on load, so a difference
-                    # here does not mean the user configured anything.
+                if key in seeded:
                     continue
                 if not _same_value(value, base.get(key)):
                     return False

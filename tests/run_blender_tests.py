@@ -19,6 +19,17 @@ for path in (_PACKAGE_PARENT, _HERE):
     if path not in sys.path:
         sys.path.insert(0, path)
 
+# The suites import the add-on by name; make that name resolve to this folder
+# whatever it is called (the package itself is name-agnostic -- see _bootstrap).
+_BOOTSTRAP = os.path.join(os.path.dirname(_HERE), "_bootstrap.py")
+if os.path.isfile(_BOOTSTRAP):
+    import importlib.util as _ilu  # noqa: E402
+
+    _spec = _ilu.spec_from_file_location("_mpp_bootstrap", _BOOTSTRAP)
+    _bootstrap = _ilu.module_from_spec(_spec)
+    _spec.loader.exec_module(_bootstrap)
+    _bootstrap.bootstrap(_BOOTSTRAP)
+
 #: Suites in execution order.  ``pure`` ones need no bpy; ``blender`` ones do.
 SUITES = (
     ("test_path_utils", "pure"),

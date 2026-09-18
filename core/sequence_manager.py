@@ -82,10 +82,19 @@ class SequenceInfo:
         return max(0, int(self.frame_end) - int(self.frame_start) + 1)
 
     def video_paths(self) -> "list[str]":
+        """Finished videos only; see :attr:`partial_videos` for interrupted ones."""
         return list(self.files.get("video", []))
 
     def has_video(self) -> bool:
         return bool(self.files.get("video"))
+
+    @property
+    def partial_videos(self) -> "list[str]":
+        """Videos an interrupted render left behind (unplayable, not 'done')."""
+        return list(self.files.get("partial_video", []))
+
+    def has_partial_video(self) -> bool:
+        return bool(self.files.get("partial_video"))
 
     def to_dict(self, *, root: str = "") -> dict:
         return {
@@ -107,6 +116,9 @@ class SequenceInfo:
             "has_blend": self.has_blend,
             "storage_mode": self.storage_mode,
             "has_animation_payload": self.has_animation_payload,
+            "has_video": self.has_video(),
+            "has_partial_video": self.has_partial_video(),
+            "partial_videos": [to_forward_slashes(p) for p in self.partial_videos],
             "problems": list(self.problems),
             "generator_version": self.generator_version,
             "files": {kind: [to_forward_slashes(p) for p in paths] for kind, paths in self.files.items()},
@@ -197,11 +209,45 @@ class SequenceManager:
         for name in sorted(filenames):
             info.files.setdefault(_classify(name), []).append(os.path.join(directory, name))
 
+        # A video only counts as *finished* when it is named after the sequence and
+        # comes with its metadata sidecar: the plugin writes ``<id>.json`` and
+        # ``<id>_camera.txt`` after the video is complete, while killing a render
+        # leaves an unfinalised ``<id>_0000-0080.mp4`` (no moov atom, unplayable)
+        # and nothing else.  Without this split, the render list showed such a
+        # sequence as "skipped / video already exists" forever.
+        finished_videos: "list[str]" = []
+        partial_videos: "list[str]" = []
+        for path in info.files.get("video", []):
+            stem = os.path.splitext(os.path.basename(path))[0]
+            metadata = os.path.splitext(path)[0] + ".json"
+            try:
+                size = os.path.getsize(path)
+            except OSError:
+                size = 0
+            canonical = stem == (info.sequence_id or os.path.basename(directory))
+            if canonical and size > 0 and os.path.isfile(metadata):
+                finished_videos.append(path)
+            else:
+                partial_videos.append(path)
+        if finished_videos:
+            info.files["video"] = finished_videos
+        else:
+            info.files.pop("video", None)
+        if partial_videos:
+            info.files["partial_video"] = partial_videos
+
         # Problems are advisory: the renderer decides what to do about them.
         if info.files.get("failure_report"):
             info.status = "failed"
             info.problems.append(
                 "this sequence was recorded as a generation failure; see failure_report.json"
+            )
+        if info.has_partial_video() and not info.has_video():
+            # Advisory, not a defect: the renderer re-renders and cleans it up.
+            names = ", ".join(os.path.basename(p) for p in info.partial_videos)
+            info.problems.append(
+                f"an interrupted render left an unfinished video ({names}); "
+                "it is not playable and will be rendered again"
             )
         if not info.files.get("blend"):
             if info.has_animation_payload:

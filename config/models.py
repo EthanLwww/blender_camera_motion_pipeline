@@ -566,6 +566,11 @@ class RenderSection:
     resolution_x: int = 1280
     resolution_y: int = 720
     resolution_percentage: int = 100
+    #: When False the sequence does not dictate a resolution: the renderer keeps
+    #: whatever the scene it loads has (the historical behaviour).  Set it True to
+    #: stamp ``resolution_x``/``y``/``percentage`` into the sequence, so a headless
+    #: render reproduces the size that was chosen at generation time.
+    resolution_explicit: bool = False
     fps: float = 24.0
     video_format: str = "mp4"
     codec: str = "H264"
@@ -598,6 +603,7 @@ class RenderSection:
             resolution_x=_read_typed(raw, "resolution_x", int, 1280, warnings),
             resolution_y=_read_typed(raw, "resolution_y", int, 720, warnings),
             resolution_percentage=_read_typed(raw, "resolution_percentage", int, 100, warnings),
+            resolution_explicit=_read_typed(raw, "resolution_explicit", bool, False, warnings),
             fps=_read_typed(raw, "fps", float, 24.0, warnings),
             video_format=_read_choice(raw, "video_format", cls.VIDEO_FORMATS, "mp4", warnings),
             codec=_read_typed(raw, "codec", str, "H264", warnings),

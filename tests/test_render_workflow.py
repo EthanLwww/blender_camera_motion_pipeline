@@ -668,6 +668,73 @@ def build_suite() -> Suite:
         finally:
             registration.unregister_all()
 
+    @suite.case("an interrupted render's leftover does not count as a finished video")
+    def _():
+        # Measured case: killing Blender mid-render left a 0-byte
+        # ``sequence_000001_0000-0080.mp4`` (Blender's own name; no moov atom, so it
+        # will not play) and nothing else in the folder.  The panel listed the
+        # sequence as ``skipped / video already exists`` and ``--skip-existing``
+        # refused to render it, so it could never be produced from the UI.
+        import bpy
+
+        from blender_motion_pipeline.core.sequence_manager import SequenceManager
+        from blender_motion_pipeline.render import render_sequences as rs
+
+        sequence_dir = state["sequences"][0]
+        output = os.path.join(OUTPUT, "interrupted")
+        shutil.rmtree(output, ignore_errors=True)
+        rendered_dir = os.path.join(output, "room", "dolly_in_01_standard", "sequence_000001")
+        os.makedirs(rendered_dir, exist_ok=True)
+        # What a render that was killed after copying the config leaves behind.
+        shutil.copy2(os.path.join(sequence_dir, "sequence_config.json"),
+                     os.path.join(rendered_dir, "sequence_config.json"))
+        leftover = os.path.join(rendered_dir, "sequence_000001_0000-0080.mp4")
+        with open(leftover, "wb"):
+            pass                                  # 0 bytes, exactly like a killed render
+        equal(os.path.getsize(leftover), 0)
+
+        # Discovery must call it unfinished, not done.
+        info = [item for item in SequenceManager(output).find_sequences()
+                if item.sequence_id == "sequence_000001"]
+        equal(len(info), 1)
+        equal(info[0].has_video(), False, "a 0-byte video is not a finished render")
+        equal(info[0].has_partial_video(), True)
+        ok(any("interrupted render" in problem for problem in info[0].problems),
+           info[0].problems)
+
+        # The render list must therefore offer it as work to do, not as skipped.
+        # ``--output-root`` recreates the scene/motion/sequence tree, which is what
+        # the panel passes and where the leftover sits.
+        args = rs.build_parser().parse_args([
+            "--input", sequence_dir, "--output-root", output,
+            "--engine", "BLENDER_WORKBENCH", "--resolution-x", "160", "--resolution-y", "90",
+            "--log-level", "ERROR",
+        ])
+        jobs = rs.resolve_sequences(args)
+        equal(len(jobs), 1)
+        selected = rs.select_jobs(jobs, args)
+        equal(selected[0].get("skip_reason", ""), "",
+              "an unfinished video must not trigger --skip-existing")
+        equal(selected[0].get("partial_video"), leftover)
+
+        # A dry run must not touch it...
+        dry_args = rs.build_parser().parse_args([
+            "--input", sequence_dir, "--output-root", output, "--dry-run", "--log-level", "ERROR",
+        ])
+        rs.render_sequence(rs.resolve_sequences(dry_args)[0], dry_args, mappings=[])
+        ok(os.path.isfile(leftover), "a dry run must not delete anything")
+
+        # ... and a real render must replace it with a finished video.
+        rs.render_sequence(selected[0], args, mappings=[])
+        finished = os.path.join(rendered_dir, "sequence_000001.mp4")
+        ok(os.path.isfile(finished), finished)
+        ok(os.path.getsize(finished) > 0, "the finished video must not be empty")
+        equal(os.path.isfile(leftover), False, "the unfinished leftover must be gone")
+        info = [item for item in SequenceManager(output).find_sequences()
+                if item.sequence_id == "sequence_000001"]
+        equal(info[0].has_video(), True)
+        equal(info[0].has_partial_video(), False)
+
     @suite.case("Clear empties the render list")
     def _():
         import bpy

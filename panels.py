@@ -294,6 +294,21 @@ class MPP_PT_quick(_MPPPanel, Panel):
         from .core import ui_task
         from .render import render_runner
 
+        # This panel is drawn right after a file load, which is exactly when
+        # Blender has emptied the Python timer registry -- so it is the reliable
+        # place to notice that a running batch lost its driver.  Two
+        # ``is_registered`` calls per redraw is nothing next to a lost run.
+        try:
+            from . import registration
+
+            registration.ensure_timers()
+            if ui_task.is_running() or render_runner.is_running():
+                from .operators import rearm_driver_timers
+
+                rearm_driver_timers()
+        except Exception:
+            pass
+
         generating = ui_task.is_running()
         rendering = render_runner.is_running()
 
@@ -364,7 +379,12 @@ class MPP_UL_render_list(bpy.types.UIList):
         if item.detail:
             column.label(text=item.detail[:64])
         if item.storage_mode == "animation":
-            row.label(text="", icon="SEQUENCE_COLOR_02")
+            # ``SEQUENCE`` marks a row that stores the animation instead of a scene
+            # copy.  Note the icon enum is not a palette: ``SEQUENCE_COLOR_02``
+            # exists as a strip-colour value, not as an icon, and using it here
+            # aborted the whole draw with a TypeError.  tests/probe_icons.py checks
+            # every literal in the package against the running build.
+            row.label(text="", icon="SEQUENCE")
         row.label(text=item.state)
 
 
@@ -452,6 +472,13 @@ class MPP_PT_output(_MPPPanel, Panel):
         row = column.row(align=True)
         row.prop(group, "trajectory_mode")
         row.prop(group, "trajectory_step")
+
+        # The sequence fixes its own output size: a preset list instead of free
+        # numbers, defaulting to 720p.  Without this the renderer follows whatever
+        # resolution the source scene has, which is how a 2000x2000 scene produced
+        # 2000x2000 videos regardless of this panel.
+        box.prop(group, "sequence_resolution")
+        box.label(text=group.resolution_summary(), icon="INFO")
 
 
 class MPP_PT_actions(_MPPPanel, Panel):

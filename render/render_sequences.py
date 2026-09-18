@@ -41,31 +41,36 @@ import time
 import traceback
 
 # --------------------------------------------------------------------------
-# make ``blender_motion_pipeline`` importable when this file is run by Blender
+# make the add-on package importable when this file is run by Blender
 # --------------------------------------------------------------------------
-# ``import blender_motion_pipeline`` needs the directory *containing* the
-# package on ``sys.path``.  Walking upwards from this file finds it whether the
-# script is run in place (``<package>/render/render_sequences.py``) or copied
-# somewhere else beside the package.
+# This script may be run in place (``<package>/render/render_sequences.py``),
+# copied somewhere beside the package, or shipped to a render node -- and the
+# package folder may be called anything.  ``_bootstrap`` (next to the package
+# ``__init__.py``) finds the package root, puts its parent on ``sys.path`` and
+# makes the name used by the imports below resolve to it.
 def _ensure_package_importable(start: str) -> str:
-    current = os.path.abspath(start)
+    import importlib.util
+
+    here = os.path.abspath(start)
+    current = here
     for _ in range(6):
-        if os.path.isdir(os.path.join(current, "blender_motion_pipeline")):
-            if current not in sys.path:
-                sys.path.insert(0, current)
-            return current
-        if os.path.basename(current) == "blender_motion_pipeline":
-            parent = os.path.dirname(current)
-            if parent not in sys.path:
-                sys.path.insert(0, parent)
-            return parent
+        candidate = os.path.join(current, "_bootstrap.py")
+        if os.path.isfile(candidate):
+            spec = importlib.util.spec_from_file_location("_mpp_bootstrap", candidate)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            root = module.bootstrap(candidate)
+            if root:
+                return os.path.dirname(module.package_root(candidate))
+        if os.path.isdir(os.path.join(current, "_bootstrap.py")):
+            break
         parent = os.path.dirname(current)
         if parent == current:
             break
         current = parent
-    if start not in sys.path:
-        sys.path.insert(0, start)
-    return start
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    return here
 
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -551,8 +556,24 @@ def resolve_engine(requested: str) -> str:
         return candidate
 
 
-def configure_render(scene, args, *, engine: str) -> dict:
-    """Apply resolution/fps/engine settings; return what was applied."""
+def configure_render(scene, args, *, engine: str, recorded: dict = None) -> dict:
+    """Apply resolution/fps/engine settings; return what was applied.
+
+    Precedence, highest first:
+
+    1. what the caller asked for (``--resolution-x`` / ``--engine`` / …, which the
+       panel passes from its own Local-render controls);
+    2. what the **sequence** recorded at generation time (``render.*`` in
+       ``sequence_config.json``) -- the resolution only when the generator was told
+       to stamp one (``resolution_explicit``), so sequences made before that option
+       existed keep following their scene;
+    3. whatever the loaded scene itself has.
+
+    Reading (2) is what makes a headless render reproduce the size chosen when the
+    sequence was generated, instead of the source scene's own render settings (a
+    2000x2000 scene used to produce 2000x2000 videos whatever the sequence said).
+    """
+    recorded = recorded or {}
     render = scene.render
     applied = {
         "engine": render.engine,
@@ -560,13 +581,44 @@ def configure_render(scene, args, *, engine: str) -> dict:
         "resolution_percentage": int(render.resolution_percentage),
         "fps": float(render.fps) / float(render.fps_base or 1.0),
         "samples": None,
+        "resolution_source": "scene",
     }
+
+    # -- the sequence's own record --------------------------------------
+    if recorded.get("resolution_explicit"):
+        try:
+            width = int(recorded.get("resolution_x") or 0)
+            height = int(recorded.get("resolution_y") or 0)
+            if width > 0 and height > 0:
+                render.resolution_x = width
+                render.resolution_y = height
+                render.resolution_percentage = max(
+                    1, min(100, int(recorded.get("resolution_percentage") or 100))
+                )
+                applied["resolution_source"] = "sequence"
+        except Exception as exc:
+            LOGGER.warning("sequence resolution could not be applied: %s", exc)
+    if not engine and recorded.get("engine"):
+        engine = resolve_engine(str(recorded["engine"]))
+        if engine:
+            applied["engine_source"] = "sequence"
+    if args.samples is None and recorded.get("samples"):
+        try:
+            args.samples = max(1, int(recorded["samples"]))
+            applied["samples_source"] = "sequence"
+        except Exception:
+            pass
+
+    # -- explicit request wins ------------------------------------------
     if args.resolution_x:
         render.resolution_x = int(args.resolution_x)
+        applied["resolution_source"] = "command line"
     if args.resolution_y:
         render.resolution_y = int(args.resolution_y)
+        applied["resolution_source"] = "command line"
     if args.resolution_percentage:
         render.resolution_percentage = max(1, min(100, int(args.resolution_percentage)))
+        applied["resolution_source"] = "command line"
     if args.fps:
         render.fps = int(round(args.fps))
         render.fps_base = 1.0
@@ -719,7 +771,28 @@ def find_sequence_camera(config: dict):
     return None
 
 
-def load_sequence_scene(job: dict, result: dict) -> "tuple[bool, str]":
+def resolve_source_scene(raw: str, mappings) -> "tuple[str, str]":
+    """The scene an animation-only sequence replays onto, honouring ``--path-map``.
+
+    A sequence records the absolute path of the scene it was generated from.  On a
+    render node that scene usually lives somewhere else, and ``--path-map`` is the
+    documented way to bridge that -- so it has to apply to this path too, not only
+    to the textures *inside* the file.  The literal path wins when it exists, so
+    mappings never override a scene that is already reachable.
+
+    Returns ``(path, note)``; ``note`` is empty unless a mapping was used.
+    """
+    if not raw:
+        return "", ""
+    if os.path.isfile(raw) or not mappings:
+        return raw, ""
+    mapped = apply_path_mappings(raw, mappings)
+    if mapped and mapped != raw and os.path.isfile(mapped):
+        return mapped, f"source scene remapped by --path-map: {raw} -> {mapped}"
+    return raw, ""
+
+
+def load_sequence_scene(job: dict, result: dict, mappings=()) -> "tuple[bool, str]":
     """Open the scene this sequence is rendered from.
 
     A blend-based sequence carries its own scene copy; an animation-only sequence
@@ -747,7 +820,10 @@ def load_sequence_scene(job: dict, result: dict) -> "tuple[bool, str]":
         result["error"] = f"sequence .blend not found: {blend or '(none discovered)'}"
         return False, ""
 
-    source = str(job.get("source_blend") or "")
+    source, note = resolve_source_scene(str(job.get("source_blend") or ""), mappings)
+    if note:
+        result["warnings"].append(note)
+        LOGGER.info("%s", note)
     if not source:
         result["error"] = (
             "animation-only sequence without sequence.source_blend: there is no scene to "
@@ -820,7 +896,7 @@ def render_sequence(job: dict, args, *, mappings, check_assets: bool = True) -> 
     result["files"] = {key: to_forward_slashes(value) for key, value in outputs.items()}
 
     # -- load ------------------------------------------------------------
-    ok, opened = load_sequence_scene(job, result)
+    ok, opened = load_sequence_scene(job, result, mappings)
     result["scene_file"] = to_forward_slashes(opened)
     if not ok:
         return result
@@ -837,6 +913,20 @@ def render_sequence(job: dict, args, *, mappings, check_assets: bool = True) -> 
     result["asset_check"] = preflight_assets(mappings, check=check_assets)
     if check_assets:
         validate_and_remap_paths(mappings)
+
+    # -- clear leftovers from an interrupted render ----------------------
+    # Blender's writer appends the frame range to the stem, so a killed render
+    # leaves ``<id>_0000-0080.mp4`` behind.  Rendering over it is fine, but the
+    # folder must not keep an unplayable file next to the finished one.  Never
+    # during a dry run: that mode promises to write nothing.
+    if not args.dry_run:
+        _finished, stale = _completed_video_for(outputs["video"])
+        if stale and os.path.isfile(stale):
+            try:
+                os.remove(stale)
+                LOGGER.info("removed unfinished video %s", to_forward_slashes(stale))
+            except OSError as exc:
+                LOGGER.warning("could not remove %s: %s", to_forward_slashes(stale), exc)
 
     # -- frames ----------------------------------------------------------
     frames_cfg = config.get("frames") or {}
@@ -856,7 +946,7 @@ def render_sequence(job: dict, args, *, mappings, check_assets: bool = True) -> 
         scene.render.fps_base = 1.0
 
     engine = resolve_engine(args.engine)
-    applied = configure_render(scene, args, engine=engine)
+    applied = configure_render(scene, args, engine=engine, recorded=(config.get("render") or {}))
     result["render"] = applied
     result["frames"] = {"frame_start": frame_start, "frame_end": frame_end,
                         "frame_count": frame_end - frame_start + 1}
@@ -1092,20 +1182,60 @@ def _remove_video_variants(expected: str, *, keep: str) -> "list[str]":
     return removed
 
 
-def _existing_video_for(expected: str) -> "str | None":
-    """An already-rendered video for ``expected``, tolerating Blender's naming."""
+def _completed_video_for(expected: str) -> "tuple[str | None, str | None]":
+    """``(finished_video, unfinished_video)`` for ``expected``.
+
+    Tolerating Blender's naming (``<id>_0000-0080.mp4``) is deliberate: Blender
+    always appends the frame range to the stem, and a render that finished but was
+    not renamed (a crash between the write and the rename) should still count as
+    done.  What must **not** count is an *interrupted* render: killing Blender
+    mid-render leaves exactly the same file name, but it is unfinalised (no
+    ``moov`` atom, unplayable) and its sidecars were never written.
+
+    The discriminators are therefore: the file has bytes, and its metadata sidecar
+    exists.  The plugin writes ``<id>.json`` and ``<id>_camera.txt`` only after the
+    video is complete, so a killed render fails both tests.  Measured case: a
+    0-byte ``sequence_000001_0000-0080.mp4`` alone in the folder made both the
+    panel and ``--skip-existing`` report "video already exists", so the sequence
+    could never be re-rendered from the UI.
+    """
+    candidates: "list[str]" = []
     if os.path.isfile(expected):
-        return expected
+        candidates.append(expected)
     directory = os.path.dirname(expected)
     stem = os.path.splitext(os.path.basename(expected))[0]
     extension = os.path.splitext(expected)[1].lower()
-    if not os.path.isdir(directory):
-        return None
-    for name in sorted(os.listdir(directory)):
-        lowered = name.lower()
-        if lowered.startswith(stem.lower()) and lowered.endswith(extension):
-            return os.path.join(directory, name)
-    return None
+    if os.path.isdir(directory):
+        for name in sorted(os.listdir(directory)):
+            lowered = name.lower()
+            if lowered.startswith(stem.lower()) and lowered.endswith(extension):
+                full = os.path.join(directory, name)
+                if full not in candidates:
+                    candidates.append(full)
+    if not candidates:
+        return None, None
+
+    finished = None
+    unfinished = None
+    for path in candidates:
+        try:
+            size = os.path.getsize(path)
+        except OSError:
+            size = 0
+        metadata = os.path.splitext(path)[0] + ".json"
+        if size > 0 and os.path.isfile(metadata):
+            # Canonical name wins when both shapes are present.
+            finished = path
+            if os.path.normcase(path) == os.path.normcase(expected):
+                break
+        elif unfinished is None:
+            unfinished = path
+    return finished, unfinished
+
+
+def _existing_video_for(expected: str) -> "str | None":
+    """A *finished* video for ``expected``, or ``None`` (see above)."""
+    return _completed_video_for(expected)[0]
 
 
 def _encode_frames_to_video(frames_dir: str, video_path: str, fps: float, args) -> bool:
@@ -1206,12 +1336,25 @@ def select_jobs(jobs, args) -> "list[dict]":
             continue
         seen.add(key)
         outputs = expected_outputs(job, args)
+        finished, unfinished = _completed_video_for(outputs["video"])
+        if unfinished:
+            # Left behind by an interrupted render: say so, and re-render instead of
+            # calling this sequence done (the file has no moov atom and will not play).
+            LOGGER.warning(
+                "%s: found an unfinished video from an interrupted render (%s); "
+                "rendering it again",
+                job["sequence_id"], to_forward_slashes(unfinished),
+            )
+            job["partial_video"] = unfinished
+            job.setdefault("warnings", []).append(
+                f"removed an unfinished video from an interrupted render: "
+                f"{os.path.basename(unfinished)}"
+            )
         if args.skip_existing and not args.overwrite:
-            existing = _existing_video_for(outputs["video"])
-            if existing is not None:
-                LOGGER.info("skipping %s: %s already exists", job["sequence_id"], to_forward_slashes(existing))
+            if finished is not None:
+                LOGGER.info("skipping %s: %s already exists", job["sequence_id"], to_forward_slashes(finished))
                 job["skip_reason"] = "video already exists"
-                job["existing_video"] = existing
+                job["existing_video"] = finished
                 selected.append(job)
                 continue
         selected.append(job)

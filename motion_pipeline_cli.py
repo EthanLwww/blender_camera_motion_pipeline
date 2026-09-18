@@ -26,6 +26,17 @@ _PACKAGE_PARENT = os.path.dirname(_HERE)
 if _PACKAGE_PARENT not in sys.path:
     sys.path.insert(0, _PACKAGE_PARENT)
 
+# The add-on folder may be called anything -- every module inside it uses relative
+# imports -- but this script has to import it by name.  ``_bootstrap`` is loaded by
+# path (so it works before the package is importable) and makes the name used below
+# resolve to whatever this folder is actually called.
+import importlib.util as _ilu  # noqa: E402
+
+_spec = _ilu.spec_from_file_location("_mpp_bootstrap", os.path.join(_HERE, "_bootstrap.py"))
+_bootstrap = _ilu.module_from_spec(_spec)
+_spec.loader.exec_module(_bootstrap)
+PACKAGE_NAME = _bootstrap.bootstrap(__file__)
+
 from blender_motion_pipeline.config.defaults import (  # noqa: E402
     default_config,
     load_config_file,
@@ -226,6 +237,9 @@ def build_config(args) -> BatchConfig:
             config.render.resolution_x = int(width)
         if height:
             config.render.resolution_y = int(height)
+        # Asking for a size here means "stamp it into the sequence": the headless
+        # renderer then uses it instead of the source scene's own resolution.
+        config.render.resolution_explicit = True
     if args.video_format:
         config.render.video_format = args.video_format
     if args.fps:

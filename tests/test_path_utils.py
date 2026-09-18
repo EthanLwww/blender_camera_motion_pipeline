@@ -83,6 +83,28 @@ def build_suite() -> Suite:
         equal(parsed[1], ("/x", "/y"))
         equal(parsed[2], ("p", "q"))
 
+    @suite.case("--path-map round trip: what parse returns, apply must understand")
+    def _():
+        # Regression: ``parse_path_mappings`` returns tuples, but
+        # ``apply_path_mappings`` only read dicts/attributes, so the documented
+        # ``--path-map`` flag parsed fine and then rewrote nothing at all.  The two
+        # halves were only ever tested apart from each other.
+        for pairs_value in (r"E:\scenes=/mnt/e/scenes", {"from": r"E:\scenes", "to": "/mnt/e/scenes"}):
+            mappings = pu.parse_path_mappings([pairs_value])
+            equal(len(mappings), 1)
+            equal(
+                pu.apply_path_mappings(r"E:\scenes\room\a.blend", mappings),
+                "/mnt/e/scenes/room/a.blend",
+            )
+            equal(
+                pu.apply_path_mappings(r"E:\elsewhere\a.blend", mappings),
+                r"E:\elsewhere\a.blend",
+            )
+        # Several rules: the longest matching prefix still wins.
+        mappings = pu.parse_path_mappings([r"E:\s=/a", r"E:\s\deep=/b"])
+        equal(pu.apply_path_mappings(r"E:\s\deep\x.blend", mappings), "/b/x.blend")
+        equal(pu.apply_path_mappings(r"E:\s\other\x.blend", mappings), "/a/other/x.blend")
+
     @suite.case("sanitize_relpath cleans every component")
     def _():
         equal(pu.sanitize_relpath("scene/../motion<1>/seq"), "scene/../motion_1/seq")

@@ -43,6 +43,7 @@ SKIP_DEBUG_SCAN = {
     "probe_baked_curves.py",
     "probe_camera_constraints.py",
     "probe_engine_switch.py",
+    "probe_icons.py",
     "probe_render_cost.py",
     "probe_save_flags.py",
     "probe_scene.py",

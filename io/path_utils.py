@@ -132,8 +132,20 @@ def _posix_normpath(path: str) -> str:
     return joined or "."
 
 def _mapping_field(item, name: str):
+    """Read one side of a mapping rule.
+
+    Three shapes reach this function and all three must work:
+    ``{"from": .., "to": ..}`` (a config file's ``batch.path_mappings``), an object
+    with those attributes, and the ``(from, to)`` tuple that
+    :func:`parse_path_mappings` returns for ``--path-map``.  Tuples were missing
+    here, which silently turned every ``--path-map`` into a no-op: the flag parsed
+    fine, and then rewrote nothing.
+    """
     if isinstance(item, dict):
         return item.get(name, "")
+    if isinstance(item, (tuple, list)):
+        index = 0 if name == "from" else 1
+        return item[index] if len(item) > index else ""
     return getattr(item, name, "")
 
 

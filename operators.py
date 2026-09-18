@@ -728,15 +728,64 @@ def _panel_group(context=None):
     group = getattr(scene, "mpp", None)
     if group is None:
         raise RuntimeError("the Motion Pipeline panel is not registered")
-    # Cheap self-heal: a factory-settings reset drops ``load_post`` handlers, and
-    # without the hook a newly opened file would not get the remembered settings.
+    # Cheap self-heal: a factory-settings reset drops ``load_post`` handlers, and a
+    # file load drops the timers; without them a newly opened file would neither
+    # get the remembered settings nor keep a running batch alive.
     try:
         from . import registration
 
         registration.ensure_load_handler()
+        registration.ensure_timers()
+        rearm_driver_timers()
     except Exception:
         pass
     return group
+
+
+def rearm_driver_timers() -> "list[str]":
+    """Re-register the timers a file load may have cleared.
+
+    ``bpy.ops.wm.open_mainfile`` **empties Blender's Python timer registry** (the
+    same file-read path that drops script-registered ``load_post`` handlers;
+    ``save_as_mainfile`` does not do it).  A panel run is driven by
+    ``_generation_tick`` and its *first* unit of work opens the first queued scene
+    -- so the loop used to delete its own driver and then sit on
+    ``"opening <scene>"`` forever, with the task still reporting ``running``
+    (observed: 807 s of no progress, an empty output folder, and
+    ``bpy.app.timers.is_registered(_generation_tick) == False``).
+
+    Every timer callback calls this **after** its unit of work, which is the only
+    moment the damage is visible: the callback is still on the stack, so it can
+    put its own registration back.  Returns the names it had to re-arm, so the
+    caller can avoid double-arming by returning ``None`` instead of an interval.
+    """
+    armed: "list[str]" = []
+    try:
+        from .core import ui_task
+
+        if ui_task.is_running() and not bpy.app.timers.is_registered(_generation_tick):
+            bpy.app.timers.register(_generation_tick, first_interval=TIMER_INTERVAL)
+            armed.append("generation")
+    except Exception:
+        LOGGER.debug("could not re-arm the generation timer", exc_info=True)
+    try:
+        from .render import render_runner
+
+        if render_runner.is_running() and not bpy.app.timers.is_registered(_render_tick):
+            bpy.app.timers.register(_render_tick, first_interval=RENDER_TIMER_INTERVAL)
+            armed.append("render")
+    except Exception:
+        LOGGER.debug("could not re-arm the render timer", exc_info=True)
+    try:
+        from . import registration
+
+        if registration.ensure_timers():
+            armed.append("settings watcher")
+    except Exception:
+        LOGGER.debug("could not re-arm the settings watcher", exc_info=True)
+    if armed:
+        LOGGER.info("re-armed timer(s) cleared by a file load: %s", ", ".join(armed))
+    return armed
 
 
 def _generation_tick():
@@ -745,6 +794,10 @@ def _generation_tick():
     Never performs file-level operations that re-enter Blender's main loop
     (``save_as_mainfile``); those are queued and flushed by
     :func:`_flush_deferred_blends` once the timer stops.
+
+    Its step opens ``.blend`` files, and a file load wipes Blender's timer
+    registry -- including this callback's own entry.  The re-arm pass at the
+    bottom is what keeps the loop alive; see :func:`rearm_driver_timers`.
     """
     from .core import ui_task
 
@@ -756,6 +809,7 @@ def _generation_tick():
     if state == "cancelling":
         ui_task.finish(state="cancelled")
         _finish_panel()
+        rearm_driver_timers()
         return None
 
     try:
@@ -764,6 +818,7 @@ def _generation_tick():
         LOGGER.error("generation step failed: %s", exc, exc_info=True)
         ui_task.abort(f"{type(exc).__name__}: {exc}")
         _finish_panel()
+        rearm_driver_timers()
         return None
 
     snapshot = ui_task.snapshot()
@@ -776,6 +831,10 @@ def _generation_tick():
         state = "done" if snapshot["failed"] == 0 else "failed"
         ui_task.finish(state=state)
         _finish_panel()
+        return None
+    if "generation" in rearm_driver_timers():
+        # Already re-registered by hand; returning an interval as well would
+        # leave two entries calling this callback.
         return None
     return TIMER_INTERVAL
 
@@ -1085,7 +1144,12 @@ def _sync_render_panel(group=None, snapshot: "dict | None" = None) -> None:
 
 
 def _render_tick():
-    """Timer callback: advance the render by one unit, then re-arm."""
+    """Timer callback: advance the render by one unit, then re-arm.
+
+    Rendering happens in child processes, but the parent still has to poll -- and
+    a file load in the parent wipes the timer registry just the same, so the
+    re-arm pass runs here too.
+    """
     from .render import render_runner
 
     try:
@@ -1095,6 +1159,7 @@ def _render_tick():
         render_runner.cancel(f"internal error: {exc}")
         _refresh_render_list()
         _sync_render_panel()
+        rearm_driver_timers()
         return None
     snapshot = render_runner.snapshot()
     _sync_render_panel(None, snapshot)
@@ -1103,6 +1168,8 @@ def _render_tick():
     if done:
         _sync_render_panel()
         _refresh_render_list()
+        return None
+    if "render" in rearm_driver_timers():
         return None
     return RENDER_TIMER_INTERVAL
 
@@ -1203,12 +1270,17 @@ class MPP_OT_load_render_sequences(_MPPBase, Operator):
             item.storage_mode = entry.get("storage_mode", "blend")
             item.state = "skipped" if entry.get("has_video") else "pending"
             problems = entry.get("problems") or []
-            item.detail = problems[0] if problems else (
-                "video already exists" if entry.get("has_video") else (
-                    "animation only (renders from the source scene)"
-                    if item.storage_mode == "animation" else ""
-                )
-            )
+            if entry.get("has_video"):
+                detail = "video already exists"
+            elif entry.get("has_partial_video"):
+                # An interrupted render leaves an unplayable video; it must not look
+                # like finished work, and the renderer will replace it.
+                detail = "unfinished video from an interrupted render; will be re-rendered"
+            elif item.storage_mode == "animation":
+                detail = "animation only (renders from the source scene)"
+            else:
+                detail = ""
+            item.detail = problems[0] if problems else detail
         group.render_list_index = 0 if len(group.render_list) else -1
         if not group.render_output_root:
             # Pre-fill the save folder so Render is one click away.

@@ -835,6 +835,23 @@ class SequenceGenerator:
 
         return convert
 
+    def _sequence_resolution(self, camera: CameraSnapshot) -> "tuple[int, int]":
+        """The size this sequence is meant to be rendered at.
+
+        ``render.resolution_explicit`` decides: when the user set a sequence
+        resolution before generating, that wins and the renderer obeys it; otherwise
+        the sequence follows the source scene (the historical behaviour, where a
+        2000x2000 scene produced 2000x2000 videos no matter what the panel said).
+        """
+        render = self.config.render
+        if render.resolution_explicit:
+            factor = max(1, int(render.resolution_percentage)) / 100.0
+            return (
+                int(round(int(render.resolution_x) * factor)),
+                int(round(int(render.resolution_y) * factor)),
+            )
+        return camera.effective_resolution
+
     def _blender_interpolation(self) -> str:
         mapping = {"LINEAR": "LINEAR", "BEZIER": "BEZIER", "CONSTANT": "CONSTANT"}
         return mapping.get(str(self.motion.interpolation).upper(), "BEZIER")
@@ -1098,7 +1115,16 @@ class SequenceGenerator:
                 "keyframes": [kf.to_dict() for kf in request.template.keyframes],
                 "unit_scale": dict(animation.unit_scale),
             },
-            "render": self.config.render.to_dict(),
+            "render": {
+                **self.config.render.to_dict(),
+                # What the scene itself would have produced, so a mismatch between
+                # the requested size and the source scene is visible in the file the
+                # renderer reads (this is what the 2000x2000 report came from).
+                "scene_resolution": list(camera.effective_resolution),
+                "effective_resolution": list(
+                    self._sequence_resolution(camera)
+                ),
+            },
             "validation": {
                 "passed": bool(report.passed) if report else None,
                 "score": round(float(report.score), 6) if report else None,

@@ -107,6 +107,23 @@ line under them showing exactly what each will act on:
 Configure the scene list and the two output folders once, then those two buttons
 are the whole workflow.
 
+A panel run is driven by a `bpy.app.timers` callback, and every step may open
+another `.blend`. Opening a file **empties Blender's Python timer registry** (the
+same file-read path that drops script-registered `load_post` handlers), so each
+callback re-registers itself — and the operator and panel-draw paths heal the
+timers too. Without that, a run killed its own driver on the first scene it opened
+and sat on `opening <scene>` forever while still reporting `running`.
+
+### Renaming the add-on folder
+
+The package is **name-agnostic**: every module inside it uses relative imports, so
+the folder may be called `blender_motion_pipeline`, `blender_camera_motion_pipeline`
+or anything else without touching the code. The two standalone scripts (the CLI and
+the headless renderer) and the test suites are the exception — they are run as
+files and must import the package by name, so they load `_bootstrap.py` by path,
+which finds the package root and makes the historical name resolve to it. Rename
+the folder, re-zip, and both entry points keep working.
+
 ### My settings — the configuration is remembered
 
 The panel's settings live on the scene (`scene.mpp`), which is **per file**: a run
@@ -184,6 +201,27 @@ what survives.
 * **Output folder**, **Save sequence .blend**, **Save validation report**,
   **Overwrite existing**, **Reuse existing sequences**, **Cameras**
   (`all`, names, or indices), and the render defaults recorded for the renderer.
+* **Render defaults (recorded for the renderer)** — engine, samples, fps, video
+  format, trajectory sampling and the **Sequence resolution**. All of them are
+  written into every sequence's `sequence_config.json`, so a later headless render
+  reproduces them.
+* **Sequence resolution** — a preset list instead of free numbers, each label
+  spelling out the pixels: *720p (1280×720)* — the default —, *1080p (1920×1080)*,
+  *1K square (1024×1024)*, *2K (2048×1080)*, *4K (3840×2160)*, plus **Follow the
+  source scene** (the historical behaviour) and **Custom size** for a size that
+  arrived from a config file or `--resolution`. The line under the dropdown says
+  what the current choice means. The record is readable from outside too:
+  `render.effective_resolution` is the size the sequence is meant to render at,
+  next to `render.scene_resolution` (what the source scene had).
+
+Without a preset the renderer keeps whatever resolution the source scene has, which
+is how a 2000×2000 scene produced 2000×2000 videos no matter what the panel said.
+Resolution precedence for a render, highest first: **command line / panel override**
+(`--resolution-x/y`, or the Local render **Override resolution** tick) → **the
+sequence's record** (only when the sequence fixes one) → **the loaded scene**. The
+render report and the per-sequence render log both name the winner
+(`resolution_source: sequence | command line | scene`), so a surprise size is
+traceable instead of mysterious.
 
 ### Local render
 
@@ -305,6 +343,11 @@ blender -b -P render/render_sequences.py -- \
     --engine CYCLES --device GPU --samples 128 \
     --resolution-x 1920 --resolution-y 1080 --fps 24 \
     --video-format mp4 --codec H264 --crf HIGH
+
+# Nothing specified? The sequence's own record is used: engine/samples always,
+# resolution when the sequence fixes one (see "Sequence output").
+blender -b -P render/render_sequences.py -- \
+    --input-root "D:\generated" --output-root "D:\render_output"
 
 # Map asset paths stored on the authoring machine onto the render node
 blender -b -P render/render_sequences.py -- \
@@ -830,7 +873,7 @@ not been produced from real MetaHuman or Blender rigs here.** See
 ## Testing
 
 ```bash
-# Everything (pure suites + Blender suites) — 180 cases
+# Everything (pure suites + Blender suites) — 187 cases
 blender -b -P blender_motion_pipeline/tests/run_blender_tests.py
 
 # Pure suites only, no Blender required (97 cases)
@@ -859,6 +902,9 @@ blender -b -P blender_motion_pipeline/tests/probe_anchor_drift.py -- "<scene.ble
 # Does the panel configuration survive a run that opens other scenes?
 blender -b -P blender_motion_pipeline/tests/probe_settings_persistence.py
 
+# Are every icon identifier the UI passes to ``label(icon=...)`` valid here?
+blender -b -P blender_motion_pipeline/tests/probe_icons.py
+
 # Does every sequence in a generated tree render the path it recorded?
 blender -b -P blender_motion_pipeline/tests/probe_all_sequences.py -- "<sequence root>"
 
@@ -881,18 +927,18 @@ tracebacks.
 
 | Suite | Cases | Result |
 |---|---|---|
-| `test_path_utils` | 15 | pass |
-| `test_config` | 17 | pass |
+| `test_path_utils` | 16 | pass |
+| `test_config` | 18 | pass |
 | `test_motion_templates` | 30 | pass |
 | `test_camera_validation` | 37 | pass |
 | `test_animation_api` | 10 | pass |
-| `test_addon_lifecycle` | 9 | pass |
-| `test_render_workflow` | 17 | pass |
-| `test_blender_integration` | 45 | pass |
-| **Total** | **180** | **pass** |
+| `test_addon_lifecycle` | 10 | pass |
+| `test_render_workflow` | 18 | pass |
+| `test_blender_integration` | 48 | pass |
+| **Total** | **187** | **pass** |
 
 `tests/static_check.py` also reports no unused imports or leftover debug markers
-across all 71 Python files.
+across all 74 Python files.
 
 End-to-end acceptance: **9/9 stages**
 

@@ -136,6 +136,7 @@ def discover_sequences(root: str, *, recursive: bool = True) -> "list[dict]":
             "frame_start": info.frame_start,
             "frame_end": info.frame_end,
             "has_video": info.has_video(),
+            "has_partial_video": info.has_partial_video(),
             "problems": list(info.problems),
         }
         for info in found

@@ -1180,6 +1180,199 @@ def build_suite() -> Suite:
         finally:
             registration.unregister_all()
 
+        # A render node keeps the source scene somewhere else, so the recorded path
+        # has to answer to --path-map like every other path does.
+        moved_root = os.path.join(OUT_DIR, "animation_only_moved")
+        shutil.rmtree(moved_root, ignore_errors=True)
+        shutil.copytree(animation_root, moved_root)
+        moved_dir = os.path.join(moved_root, "single", "push_in", "sequence_000001")
+        moved_config = load_json_file(os.path.join(moved_dir, "sequence_config.json"))
+        original_source = moved_config["sequence"]["source_blend"]
+        moved_config["sequence"]["source_blend"] = "Z:/elsewhere/single.blend"
+        save_json_file(os.path.join(moved_dir, "sequence_config.json"), moved_config)
+
+        missing_args = rs.build_parser().parse_args([
+            "--input", moved_dir,
+            "--output", os.path.join(RENDER_DIR, "animation_only_moved"),
+            "--engine", "BLENDER_WORKBENCH",
+            "--resolution-x", "160", "--resolution-y", "90",
+            "--overwrite", "--log-level", "ERROR",
+        ])
+        missing_job = rs.resolve_sequences(missing_args)[0]
+        failed = rs.render_sequence(missing_job, missing_args, mappings=[])
+        equal(failed["ok"], False)
+        ok("source scene not found" in failed["error"], failed["error"])
+
+        mapped_args = rs.build_parser().parse_args([
+            "--input", moved_dir,
+            "--output", os.path.join(RENDER_DIR, "animation_only_moved"),
+            "--engine", "BLENDER_WORKBENCH",
+            "--resolution-x", "160", "--resolution-y", "90",
+            "--overwrite", "--log-level", "ERROR",
+            "--path-map", f"Z:/elsewhere={os.path.dirname(original_source)}",
+        ])
+        mapped_job = rs.resolve_sequences(mapped_args)[0]
+        mapped = rs.render_sequence(
+            mapped_job, mapped_args,
+            mappings=[(os.path.dirname("Z:/elsewhere/single.blend"), os.path.dirname(original_source))],
+        )
+        ok(mapped["ok"], mapped.get("error"))
+        ok(any("--path-map" in warning for warning in mapped["warnings"]), mapped["warnings"])
+
+    @suite.case("the resolution presets map to documented sizes and default to 720p")
+    def _():
+        # The panel offers presets rather than free numbers, so the labels and the
+        # sizes behind them have to stay in step -- and a size that came from a config
+        # file must show up as "custom" instead of being silently rewritten.
+        import bpy
+
+        from blender_motion_pipeline import registration
+        from blender_motion_pipeline.properties import RESOLUTION_PRESETS, RESOLUTION_SIZES
+
+        registration.register_all()
+        try:
+            for identifier, label, _tip in RESOLUTION_PRESETS:
+                if identifier in RESOLUTION_SIZES:
+                    width, height = RESOLUTION_SIZES[identifier]
+                    ok(str(width) in label and str(height) in label,
+                       f"preset {identifier!r} must spell out its pixels: {label!r}")
+
+            group = bpy.context.scene.mpp
+            equal(group.sequence_resolution, "720p", "the default must be 1280x720")
+            equal(group.resolution_summary(), "Sequences record 1280 x 720.")
+            # The preselected preset must not make a fresh scene look configured, or
+            # the remembered-settings restore would skip every new file.
+            ok(group.is_pristine(), "a fresh scene must still count as unconfigured")
+
+            expected = {
+                "720p": (1280, 720, True),
+                "1080p": (1920, 1080, True),
+                "1k": (1024, 1024, True),
+                "2k": (2048, 1080, True),
+                "4k": (3840, 2160, True),
+                # "Follow the scene": the numbers on the group are irrelevant because
+                # the sequence does not dictate a size.
+                "scene": (None, None, False),
+            }
+            for preset, (width, height, explicit) in expected.items():
+                group.sequence_resolution = preset
+                config = group.to_config()
+                if width is not None:
+                    equal(config.render.resolution_x, width, preset)
+                    equal(config.render.resolution_y, height, preset)
+                equal(config.render.resolution_explicit, explicit, preset)
+                # ... and the round trip back into the panel picks the same entry.
+                group.from_config(config)
+                equal(group.sequence_resolution, preset, preset)
+
+            # A size from outside the presets is preserved, not rewritten.
+            group.sequence_resolution = "720p"
+            config = group.to_config()
+            config.render.resolution_x = 1000
+            config.render.resolution_y = 1000
+            config.render.resolution_explicit = True
+            group.from_config(config)
+            equal(group.sequence_resolution, "custom")
+            round_tripped = group.to_config()
+            equal((round_tripped.render.resolution_x, round_tripped.render.resolution_y), (1000, 1000))
+            equal(round_tripped.render.resolution_explicit, True)
+            ok("1000 x 1000" in group.resolution_summary(), group.resolution_summary())
+
+            # And it ends up in the sequence record the renderer reads.
+            root = os.path.join(OUT_DIR, "resolution_preset")
+            config = make_config(root, names=["push_in"])
+            config.render.resolution_explicit = True
+            config.render.resolution_x = 1024
+            config.render.resolution_y = 1024
+            from blender_motion_pipeline.core.batch_runner import BatchRunner
+
+            BatchRunner(config, output_root=root,
+                        scene_entries=[SceneEntry(path=state["single"])]).run()
+            recorded = load_json_file(os.path.join(root, "single", "push_in", "sequence_000001",
+                                                   "sequence_config.json"))
+            equal(recorded["render"]["effective_resolution"], [1024, 1024])
+        finally:
+            registration.unregister_all()
+
+    @suite.case("a sequence can fix its own output resolution for the renderer")
+    def _():
+        # The recorded size used to be informational only: the renderer kept the
+        # loaded scene's resolution, so a 2000x2000 scene produced 2000x2000 videos
+        # whatever the generator recorded.  With ``resolution_explicit`` the sequence
+        # dictates the size, and a render with no explicit request obeys it.
+        import bpy
+
+        from blender_motion_pipeline.core.batch_runner import BatchRunner
+        from blender_motion_pipeline.render import render_sequences as rs
+
+        root = os.path.join(OUT_DIR, "resolution")
+        config = make_config(root, names=["push_in"])
+        config.render.resolution_explicit = True
+        config.render.resolution_x = 320
+        config.render.resolution_y = 180
+        config.render.resolution_percentage = 100
+        report = BatchRunner(
+            config, output_root=root, scene_entries=[SceneEntry(path=state["single"])]
+        ).run()
+        ok(report.ok, report.summary_text())
+
+        sequence_dir = os.path.join(root, "single", "push_in", "sequence_000001")
+        recorded = load_json_file(os.path.join(sequence_dir, "sequence_config.json"))
+        equal(recorded["render"]["resolution_explicit"], True)
+        equal(recorded["render"]["resolution_x"], 320)
+        equal(recorded["render"]["effective_resolution"], [320, 180],
+              "the sequence must record the size it is meant to render at")
+
+        # The fixture scene renders at 160x90, so a renderer that ignored the record
+        # would come out 160x90 -- the difference is what makes this test meaningful.
+        args = rs.build_parser().parse_args([
+            "--input", sequence_dir,
+            "--output-root", os.path.join(RENDER_DIR, "resolution"),
+            "--engine", "BLENDER_WORKBENCH",
+            "--log-level", "ERROR",
+        ])
+        result = rs.render_sequence(rs.resolve_sequences(args)[0], args, mappings=[])
+        ok(result["ok"], result.get("error"))
+        equal(result["render"]["resolution"], [320, 180],
+              "the renderer must use the sequence's recorded resolution")
+        equal(result["render"]["resolution_source"], "sequence")
+
+        # An explicit request still wins over the record.
+        args2 = rs.build_parser().parse_args([
+            "--input", sequence_dir,
+            "--output-root", os.path.join(RENDER_DIR, "resolution2"),
+            "--engine", "BLENDER_WORKBENCH",
+            "--resolution-x", "120", "--resolution-y", "60",
+            "--log-level", "ERROR",
+        ])
+        result2 = rs.render_sequence(rs.resolve_sequences(args2)[0], args2, mappings=[])
+        ok(result2["ok"], result2.get("error"))
+        equal(result2["render"]["resolution"], [120, 60])
+        equal(result2["render"]["resolution_source"], "command line")
+
+        # A sequence that does not dictate one keeps following its scene.
+        plain_root = os.path.join(OUT_DIR, "resolution_plain")
+        plain = make_config(plain_root, names=["push_in"])
+        plain.render.resolution_explicit = False
+        BatchRunner(
+            plain, output_root=plain_root, scene_entries=[SceneEntry(path=state["single"])]
+        ).run()
+        plain_dir = os.path.join(plain_root, "single", "push_in", "sequence_000001")
+        plain_recorded = load_json_file(os.path.join(plain_dir, "sequence_config.json"))
+        equal(plain_recorded["render"]["resolution_explicit"], False)
+        equal(plain_recorded["render"]["effective_resolution"], [160, 90],
+              "without the override the sequence follows the scene")
+        args3 = rs.build_parser().parse_args([
+            "--input", plain_dir,
+            "--output-root", os.path.join(RENDER_DIR, "resolution_plain"),
+            "--engine", "BLENDER_WORKBENCH",
+            "--log-level", "ERROR",
+        ])
+        result3 = rs.render_sequence(rs.resolve_sequences(args3)[0], args3, mappings=[])
+        ok(result3["ok"], result3.get("error"))
+        equal(result3["render"]["resolution_source"], "scene")
+        equal(result3["render"]["resolution"], [160, 90])
+
     @suite.case("dry-run resolves outputs without rendering")
     def _():
         from blender_motion_pipeline.render import render_sequences as rs
@@ -1501,6 +1694,75 @@ def build_suite() -> Suite:
             ok(os.path.isfile(os.path.join(OUT_DIR, "ui", "single", "still",
                                            "sequence_000001", "sequence_config.json")),
                "the sequence config must be written")
+        finally:
+            registration.unregister_all()
+
+    @suite.case("a panel run keeps its driver across the scene opens it performs")
+    def _():
+        # Regression: opening a .blend empties ``bpy.app.timers`` (measured in this
+        # build), and a panel run's *first* unit of work opens the first queued
+        # scene -- so the loop unregistered its own driver and then sat on
+        # "opening <scene>" forever: task stuck at ``running``, 807 s without a
+        # single file written, CPU idle.
+        #
+        # The existing panel case drives the task by calling ``ui_task.step()``
+        # directly, which is exactly why it never caught this: it bypassed the
+        # timer registry altogether.
+        import bpy
+        import time
+
+        from blender_motion_pipeline import operators, registration
+        from blender_motion_pipeline.core import ui_task
+
+        registration.unregister_all()
+        registration.register_all()
+        try:
+            group = bpy.context.scene.mpp
+            group.output_root = os.path.join(OUT_DIR, "timer_survival")
+            group.template_path = write_templates()
+            group.motion_names = "still"
+            group.character_mode = CHARACTER_MODE_NONE
+            group.overwrite = True
+            group.resume = False
+            group.validation_enabled = False
+            group.save_sequence_blend = False
+            group.file_path = state["single"]
+            bpy.ops.mpp.add_files()
+
+            ok("FINISHED" in bpy.ops.mpp.start_generation())
+            ok(bpy.app.timers.is_registered(operators._generation_tick),
+               "Start generation must arm the driver timer")
+
+            # One real tick: in a GUI Blender the timer calls this, and it is the
+            # call that opens the scene (and therefore wipes the registry).
+            operators._generation_tick()
+            ok(bpy.app.timers.is_registered(operators._generation_tick),
+               "the driver must survive the scene open it just performed")
+            ok(ui_task.is_running(), ui_task.snapshot())
+
+            # Pump to completion the way the timer would, checking after every
+            # tick that the driver is still armed.
+            deadline = time.time() + 180
+            while ui_task.is_running() and time.time() < deadline:
+                operators._generation_tick()
+                ok(bpy.app.timers.is_registered(operators._generation_tick),
+                   "the driver must stay armed after every step")
+                time.sleep(0.01)
+            snapshot = ui_task.snapshot()
+            equal(snapshot["state"], "done", snapshot)
+            ok(snapshot["generated"] >= 1, snapshot)
+            ok(os.path.isfile(os.path.join(OUT_DIR, "timer_survival", "single", "still",
+                                           "sequence_000001", "sequence_config.json")),
+               "the run must actually produce a sequence")
+
+            # Second healing path: any operator press restores the timers after an
+            # arbitrary file load (the panel draw does the same).
+            bpy.ops.wm.open_mainfile(filepath=state["single"])
+            ok(not bpy.app.timers.is_registered(registration._scene_watch_tick),
+               "the premise of this check: a file load does clear the timers")
+            operators._panel_group()
+            ok(bpy.app.timers.is_registered(registration._scene_watch_tick),
+               "an operator press must put the settings watcher back")
         finally:
             registration.unregister_all()
 

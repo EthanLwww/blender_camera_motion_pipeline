@@ -82,6 +82,26 @@ def _install_scene_watcher() -> None:
     LOGGER.debug("installed the scene watcher")
 
 
+def ensure_timers() -> "list[str]":
+    """Re-register the add-on's own timers if a file load cleared them.
+
+    ``bpy.ops.wm.open_mainfile`` empties the Python timer registry, so the scene
+    watcher dies on every file load -- including the ones a generation run
+    performs.  This puts it back and reports what it armed (``[]`` when nothing was
+    missing), so callers can log it and avoid double-arming.
+    """
+    import bpy
+
+    armed: "list[str]" = []
+    if not bpy.app.timers.is_registered(_scene_watch_tick):
+        bpy.app.timers.register(_scene_watch_tick, first_interval=SCENE_WATCH_INTERVAL)
+        armed.append("settings watcher")
+    if _deferred_timer_active and not bpy.app.timers.is_registered(_deferred_defaults_tick):
+        bpy.app.timers.register(_deferred_defaults_tick, first_interval=1.0)
+        armed.append("deferred defaults")
+    return armed
+
+
 def _scene_token() -> "tuple[str, str] | None":
     import bpy
 
@@ -105,6 +125,10 @@ def _scene_watch_tick():
         _last_scene_token = token
         ensure_load_handler()
         apply_remembered_settings(quiet=True)
+    # A file load wipes the registry (that is how the scene changed in the first
+    # place), so put the watcher back before returning.
+    if "settings watcher" in ensure_timers():
+        return None
     return SCENE_WATCH_INTERVAL
 
 
@@ -361,6 +385,7 @@ def reload_addon() -> str:
 __all__ = [
     "apply_remembered_settings",
     "ensure_load_handler",
+    "ensure_timers",
     "is_registered",
     "panel_group",
     "register_all",
