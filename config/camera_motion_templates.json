@@ -1,0 +1,3762 @@
+[
+  {
+    "id": "dolly_in_01_standard",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          150.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          300.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "dolly_in_02_subtle",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          75.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          150.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "dolly_in_03_strong",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          170.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          340.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "dolly_in_04_low_angle",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          8.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          150.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          8.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          300.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          8.0,
+          0.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "dolly_in_05_diagonal_left",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          6.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          150.0,
+          40.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          3.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          300.0,
+          80.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "dolly_out_01_standard",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          -150.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          -300.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "dolly_out_02_subtle",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          -75.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          -150.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "dolly_out_03_strong",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          -300.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          -600.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "dolly_out_04_high_angle",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          -10.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          -150.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          -10.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          -300.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          -10.0,
+          0.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "dolly_out_05_diagonal_right",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          -150.0,
+          40.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          -3.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          -300.0,
+          80.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          -6.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "fixed_01_standard",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "fixed_02_low_angle",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          8.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          8.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          8.0,
+          0.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "fixed_03_high_angle",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          -10.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          -10.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          -10.0,
+          0.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "fixed_04_offset_left",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          5.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          5.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          5.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "fixed_05_telephoto",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 85.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 85.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 85.0
+      }
+    ]
+  },
+  {
+    "id": "hitchcock_01_base_forward_standard",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 100.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          170.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 75.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          340.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 50.0
+      }
+    ]
+  },
+  {
+    "id": "hitchcock_02_base_forward_fast_push",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 120.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          170.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 84.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          340.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 48.0
+      }
+    ]
+  },
+  {
+    "id": "hitchcock_03_base_forward_slow_creep",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 80.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          175.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 60.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          350.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 40.0
+      }
+    ]
+  },
+  {
+    "id": "hitchcock_04_base_forward_tele_to_wide",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 140.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          170.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 91.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          340.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 56.0
+      }
+    ]
+  },
+  {
+    "id": "hitchcock_05_base_forward_offset_left",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          5.0
+        ],
+        "focal": 100.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          170.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          5.0
+        ],
+        "focal": 75.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          340.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          5.0
+        ],
+        "focal": 50.0
+      }
+    ]
+  },
+  {
+    "id": "hitchcock_06_base_backward_standard",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 24.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          -250.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 36.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          -500.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 48.0
+      }
+    ]
+  },
+  {
+    "id": "hitchcock_07_base_backward_fast_pull",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 18.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          -300.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 36.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          -600.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 72.0
+      }
+    ]
+  },
+  {
+    "id": "hitchcock_08_base_backward_slow_pressure",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 28.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          -225.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 42.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          -450.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 56.0
+      }
+    ]
+  },
+  {
+    "id": "hitchcock_09_base_backward_wide_to_tele",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 14.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          -290.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 42.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          -580.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 84.0
+      }
+    ]
+  },
+  {
+    "id": "hitchcock_10_base_backward_offset_right",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          -5.0
+        ],
+        "focal": 24.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          -250.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          -5.0
+        ],
+        "focal": 36.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          -500.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          -5.0
+        ],
+        "focal": 48.0
+      }
+    ]
+  },
+  {
+    "id": "pan_left_01_standard",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          -15.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          -30.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "pan_left_02_subtle",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          -7.5
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          -15.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "pan_left_03_strong",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          -30.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          -60.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "pan_left_04_offset_left",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          8.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          -8.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          -24.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "pan_left_05_high_angle",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          -8.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          -8.0,
+          -15.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          -8.0,
+          -30.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "pan_right_01_standard",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          15.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          30.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "pan_right_02_subtle",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          7.5
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          15.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "pan_right_03_strong",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          30.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          60.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "pan_right_04_offset_right",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          -8.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          8.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          24.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "pan_right_05_low_angle",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          8.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          8.0,
+          15.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          8.0,
+          30.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "pedestal_down_01_standard",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          0.0,
+          -17.5
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          0.0,
+          -35.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "pedestal_down_02_subtle",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          0.0,
+          -10.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          0.0,
+          -20.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "pedestal_down_03_strong",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          0.0,
+          -25.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          0.0,
+          -50.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "pedestal_down_04_with_tilt_up",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          -8.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          0.0,
+          -17.5
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          0.0,
+          -35.0
+        ],
+        "rotation": [
+          0.0,
+          8.0,
+          0.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "pedestal_down_05_offset_right",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          0.0,
+          -17.5
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          0.0,
+          -35.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "pedestal_up_01_standard",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          0.0,
+          60.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          0.0,
+          120.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "pedestal_up_02_subtle",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          0.0,
+          30.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          0.0,
+          60.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "pedestal_up_03_strong",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          0.0,
+          125.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          0.0,
+          250.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "pedestal_up_04_with_tilt_down",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          8.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          0.0,
+          60.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          0.0,
+          120.0
+        ],
+        "rotation": [
+          0.0,
+          -8.0,
+          0.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "pedestal_up_05_offset_left",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          0.0,
+          60.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          0.0,
+          120.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "roll_01_clockwise",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          15.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          30.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "roll_02_counterclockwise",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          -15.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          -30.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "roll_03_subtle_dutch",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          -5.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          5.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "roll_04_strong_spin",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          -20.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          20.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "roll_05_roll_with_push",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          -8.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          150.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          300.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          8.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "tilt_down_01_standard",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          10.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          -10.0,
+          0.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "tilt_down_02_subtle",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          5.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          -5.0,
+          0.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "tilt_down_03_strong",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          18.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          -18.0,
+          0.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "tilt_down_04_high_start",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          16.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          2.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          -10.0,
+          0.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "tilt_down_05_wide_angle",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          10.0,
+          0.0
+        ],
+        "focal": 24.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 24.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          -10.0,
+          0.0
+        ],
+        "focal": 24.0
+      }
+    ]
+  },
+  {
+    "id": "tilt_up_01_standard",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          -10.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          10.0,
+          0.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "tilt_up_02_subtle",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          -5.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          5.0,
+          0.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "tilt_up_03_strong",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          -18.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          18.0,
+          0.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "tilt_up_04_low_start",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          -14.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          -2.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          10.0,
+          0.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "tilt_up_05_telephoto",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          -10.0,
+          0.0
+        ],
+        "focal": 70.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 70.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          10.0,
+          0.0
+        ],
+        "focal": 70.0
+      }
+    ]
+  },
+  {
+    "id": "truck_left_01_standard",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          -150.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          -300.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "truck_left_02_subtle",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          -75.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          -150.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "truck_left_03_strong",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          -165.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          -330.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "truck_left_04_forward_bias",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          80.0,
+          -150.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          160.0,
+          -300.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "truck_left_05_low_angle",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          6.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          -150.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          6.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          -300.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          6.0,
+          0.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "truck_right_01_standard",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          150.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          300.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "truck_right_02_subtle",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          75.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          150.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "truck_right_03_strong",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          205.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          410.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "truck_right_04_forward_bias",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          20.0,
+          120.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          40.0,
+          240.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "truck_right_05_high_angle",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          -8.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          150.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          -8.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          300.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          -8.0,
+          0.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "zoom_in_01_standard",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 24.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 45.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 70.0
+      }
+    ]
+  },
+  {
+    "id": "zoom_in_02_subtle",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 45.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 55.0
+      }
+    ]
+  },
+  {
+    "id": "zoom_in_03_strong",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 18.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 60.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 100.0
+      }
+    ]
+  },
+  {
+    "id": "zoom_in_04_low_angle",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          6.0,
+          0.0
+        ],
+        "focal": 24.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          6.0,
+          0.0
+        ],
+        "focal": 45.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          6.0,
+          0.0
+        ],
+        "focal": 70.0
+      }
+    ]
+  },
+  {
+    "id": "zoom_in_05_offset_left",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          4.0
+        ],
+        "focal": 24.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          4.0
+        ],
+        "focal": 45.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          4.0
+        ],
+        "focal": 70.0
+      }
+    ]
+  },
+  {
+    "id": "zoom_out_01_standard",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 70.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 45.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 24.0
+      }
+    ]
+  },
+  {
+    "id": "zoom_out_02_subtle",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 55.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 45.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 35.0
+      }
+    ]
+  },
+  {
+    "id": "zoom_out_03_strong",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 100.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 60.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "focal": 18.0
+      }
+    ]
+  },
+  {
+    "id": "zoom_out_04_high_angle",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          -8.0,
+          0.0
+        ],
+        "focal": 70.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          -8.0,
+          0.0
+        ],
+        "focal": 45.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          -8.0,
+          0.0
+        ],
+        "focal": 24.0
+      }
+    ]
+  },
+  {
+    "id": "zoom_out_05_offset_right",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          -4.0
+        ],
+        "focal": 70.0
+      },
+      {
+        "frame": 40,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          -4.0
+        ],
+        "focal": 45.0
+      },
+      {
+        "frame": 80,
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          -4.0
+        ],
+        "focal": 24.0
+      }
+    ]
+  }
+]

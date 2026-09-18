@@ -1,0 +1,156 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Blender Motion Pipeline batch configuration",
+  "description": "Top level configuration consumed by --config of motion_pipeline_cli.py / render_sequences.py and by the add-on export action. Nested sections mirror the Python dataclasses in config/models.py.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "batch": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "output_root": { "type": "string" },
+        "mode": { "type": "string", "enum": ["none", "with_character", "both"] },
+        "scene_name_mode": { "type": "string", "enum": ["stem", "filename"] },
+        "overwrite": { "type": "boolean" },
+        "resume": { "type": "boolean" },
+        "save_sequence_blend": { "type": "boolean" },
+        "save_validation_report": { "type": "boolean" },
+        "verbose": { "type": "boolean" },
+        "character_asset_root": { "type": "string" },
+        "animation_asset_root": { "type": "string" },
+        "character_provider": { "type": "string" },
+        "path_mappings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "from": { "type": "string" },
+              "to": { "type": "string" }
+            },
+            "required": ["from", "to"]
+          }
+        }
+      }
+    },
+    "motion": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "template_source": { "type": "string" },
+        "template_data": { "type": "array", "items": { "type": "object" } },
+        "template_names": { "type": "array", "items": { "type": "string" } },
+        "template_overrides": { "type": "object" },
+        "matrix_source": { "type": "string", "enum": ["auto", "file", "input"] },
+        "frame_start": { "type": "integer", "minimum": 0 },
+        "frame_scale": { "type": "number", "minimum": 0 },
+        "interpolation": { "type": "string", "enum": ["LINEAR", "BEZIER", "CONSTANT"] },
+        "unit_scale": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "location_scale": { "type": "number" },
+            "fps": { "type": "number", "exclusiveMinimum": 0 },
+            "rotation_order": { "type": "string", "enum": ["XYZ", "XZY", "YXZ", "YZX", "ZXY", "ZYX"] },
+            "yaw_axis": { "type": "string", "enum": ["X", "Y", "Z"] },
+            "pitch_axis": { "type": "string", "enum": ["X", "Y", "Z"] },
+            "roll_axis": { "type": "string", "enum": ["X", "Y", "Z"] },
+            "yaw_sign": { "type": "number" },
+            "pitch_sign": { "type": "number" },
+            "roll_sign": { "type": "number" },
+            "location_forward": { "type": "number" },
+            "location_right": { "type": "number" },
+            "location_up": { "type": "number" }
+          }
+        }
+      }
+    },
+    "validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "sample_step": { "type": "integer", "minimum": 1 },
+        "extra_sample_frames": { "type": "array", "items": { "type": "integer" } },
+        "clearance": { "type": "number", "minimum": 0 },
+        "inside_epsilon": { "type": "number", "minimum": 0 },
+        "max_position_jump": { "type": "number", "minimum": 0 },
+        "max_rotation_jump_deg": { "type": "number", "minimum": 0 },
+        "min_clip_start": { "type": "number", "exclusiveMinimum": 0 },
+        "max_clip_end": { "type": "number", "exclusiveMinimum": 0 },
+        "occlusion_ray_count": { "type": "integer", "minimum": 1 },
+        "check_character_visibility": { "type": "boolean" },
+        "min_character_visible_ratio": { "type": "number", "minimum": 0, "maximum": 1 },
+        "min_character_on_screen_frames": { "type": "number", "minimum": 0, "maximum": 1 },
+        "character_probe_points": { "type": "integer", "minimum": 1 },
+        "check_character_overlap": { "type": "boolean" }
+      }
+    },
+    "search": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "min_radius": { "type": "number", "minimum": 0 },
+        "max_radius": { "type": "number", "minimum": 0 },
+        "candidate_count": { "type": "integer", "minimum": 1 },
+        "azimuth_samples": { "type": "integer", "minimum": 1 },
+        "elevation_samples": { "type": "integer", "minimum": 1 },
+        "shell_only": { "type": "boolean" },
+        "max_retries": { "type": "integer", "minimum": 0 },
+        "random_seed": { "type": "integer" },
+        "allow_rotation_adjust": { "type": "boolean" },
+        "max_rotation_adjust_deg": { "type": "number", "minimum": 0 },
+        "allow_focal_adjust": { "type": "boolean" },
+        "focal_adjust_steps": { "type": "number", "minimum": 0 },
+        "max_output_candidates": { "type": "integer", "minimum": 0 },
+        "weights": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "distance": { "type": "number" },
+            "clipping": { "type": "number" },
+            "character_invisible": { "type": "number" },
+            "occlusion": { "type": "number" },
+            "rotation_delta": { "type": "number" },
+            "focal_delta": { "type": "number" }
+          }
+        }
+      }
+    },
+    "render": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "engine": { "type": "string" },
+        "samples": { "type": "integer", "minimum": 1 },
+        "resolution_x": { "type": "integer", "minimum": 1 },
+        "resolution_y": { "type": "integer", "minimum": 1 },
+        "resolution_percentage": { "type": "integer", "minimum": 1, "maximum": 100 },
+        "fps": { "type": "number", "exclusiveMinimum": 0 },
+        "video_format": { "type": "string", "enum": ["mp4", "mkv", "webm", "avi"] },
+        "codec": { "type": "string" },
+        "constant_rate_factor": { "type": "string" },
+        "input_root": { "type": "string" },
+        "output_root": { "type": "string" },
+        "recursive": { "type": "boolean" },
+        "overwrite": { "type": "boolean" },
+        "skip_existing": { "type": "boolean" },
+        "dry_run": { "type": "boolean" },
+        "workers": { "type": "integer", "minimum": 1 },
+        "trajectory_mode": { "type": "string", "enum": ["all_frames", "sampled"] },
+        "trajectory_step": { "type": "integer", "minimum": 1 },
+        "keep_frames": { "type": "boolean" },
+        "scene_filter": { "type": "array", "items": { "type": "string" } },
+        "motion_filter": { "type": "array", "items": { "type": "string" } },
+        "sequence_filter": { "type": "array", "items": { "type": "string" } },
+        "log_level": { "type": "string", "enum": ["DEBUG", "INFO", "WARNING", "ERROR"] }
+      }
+    }
+  }
+}

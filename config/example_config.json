@@ -1,0 +1,131 @@
+{
+  "schema_version": 1,
+  "batch": {
+    "output_root": "D:/generated_sequences",
+    "mode": "none",
+    "scene_name_mode": "stem",
+    "overwrite": false,
+    "resume": true,
+    "save_sequence_blend": true,
+    "save_validation_report": true,
+    "verbose": true,
+    "character_asset_root": "",
+    "animation_asset_root": "",
+    "character_provider": "auto",
+    "path_mappings": [
+      {
+        "from": "E:/UE",
+        "to": "/mnt/e/UE"
+      }
+    ]
+  },
+  "motion": {
+    "template_path": "E:/UE/DataGenScenes/Plugins/MetaHumanScenePipeline/Templates/camera_motion_templates.json",
+    "template_names": [],
+    "template_overrides": {
+      "dolly_in_03_strong": {
+        "location_scale": 0.5,
+        "note": "halve the push distance for tight interiors"
+      }
+    },
+    "matrix_source": "auto",
+    "frame_start": 0,
+    "frame_end": null,
+    "frame_scale": 1.0,
+    "interpolation": "BEZIER",
+    "unit_scale": {
+      "location_scale": 0.01,
+      "fps": 24.0,
+      "rotation_order": "XYZ",
+      "yaw_axis": "Z",
+      "pitch_axis": "X",
+      "roll_axis": "Z",
+      "yaw_sign": -1.0,
+      "pitch_sign": 1.0,
+      "roll_sign": -1.0,
+      "location_forward": -1.0,
+      "location_right": 1.0,
+      "location_up": 1.0
+    }
+  },
+  "validation": {
+    "enabled": true,
+    "sample_step": 10,
+    "extra_sample_frames": [],
+    "clearance": 0.25,
+    "obstruction_distance": 1.0,
+    "inside_epsilon": 0.001,
+    "max_position_jump": 2.0,
+    "max_rotation_jump_deg": 45.0,
+    "min_clip_start": 0.01,
+    "max_clip_end": 100000.0,
+    "occlusion_ray_count": 9,
+    "jump_gap_scale": "sqrt",
+    "check_character_visibility": true,
+    "min_character_visible_ratio": 0.05,
+    "min_character_on_screen_frames": 0.6,
+    "character_probe_points": 27,
+    "check_character_overlap": true
+  },
+  "search": {
+    "enabled": true,
+    "min_radius": 0.2,
+    "max_radius": 3.0,
+    "candidate_count": 64,
+    "azimuth_samples": 12,
+    "elevation_samples": 5,
+    "shell_only": false,
+    "max_retries": 2,
+    "random_seed": 1234,
+    "allow_rotation_adjust": true,
+    "max_rotation_adjust_deg": 25.0,
+    "allow_focal_adjust": true,
+    "focal_adjust_steps": 3.0,
+    "max_output_candidates": 1,
+    "weights": {
+      "distance": 1.0,
+      "clipping": 4.0,
+      "character_invisible": 2.0,
+      "occlusion": 1.5,
+      "rotation_delta": 0.5,
+      "focal_delta": 0.25
+    }
+  },
+  "render": {
+    "engine": "BLENDER_EEVEE",
+    "samples": 32,
+    "resolution_x": 1280,
+    "resolution_y": 720,
+    "resolution_percentage": 100,
+    "fps": 24.0,
+    "video_format": "mp4",
+    "codec": "H264",
+    "constant_rate_factor": "HIGH",
+    "input_root": "D:/generated_sequences",
+    "output_root": "D:/render_output",
+    "recursive": true,
+    "overwrite": false,
+    "skip_existing": true,
+    "dry_run": false,
+    "workers": 1,
+    "trajectory_mode": "all_frames",
+    "trajectory_step": 1,
+    "keep_frames": false,
+    "scene_filter": [],
+    "motion_filter": [],
+    "sequence_filter": [],
+    "log_level": "INFO"
+  },
+  "scenes": [
+    {
+      "path": "E:/scenes/room001.blend",
+      "name": "room001",
+      "enabled": true
+    },
+    {
+      "path": "E:/scenes/room002.blend",
+      "name": "room002",
+      "enabled": true
+    }
+  ]
+}
