@@ -244,24 +244,23 @@ class SequenceGenerator:
         character_provider: "CharacterProvider | None" = None,
         logger=None,
         task: "TaskController | None" = None,
+        project_layout=None,
     ):
         self.config = config
         self.output_root = normalize_path(output_root)
         self.provider = character_provider
         self.logger = logger or get_logger("sequence_generator")
         self.task = task
+        #: The project folder the sequences belong to, when generation runs
+        #: through one.  It lets a sequence record *where inside the shipped
+        #: project* its scene lives, so the folder can be moved to a render node.
+        self.project_layout = project_layout
         self.motion = config.motion
         self.validation_config = config.validation
         self.search_config = config.search
         self.unit_scale: TemplateUnitScale = config.motion.unit_scale
         self.results: "list[SequenceResult]" = []
         self.notes: "list[str]" = []
-        #: When True, ``sequence.blend`` writes are queued instead of executed.
-        #: Required for timer-driven (non-blocking) panel runs; see
-        #: :meth:`save_sequence_blend`.
-        self.defer_blend_save: bool = False
-        #: Absolute paths of sequence blends waiting to be written.
-        self.pending_blend_saves: "list[str]" = []
 
     # -- helpers ---------------------------------------------------------
     def _tick(self, *, stage: str = "", step: int = 1) -> None:
@@ -278,6 +277,27 @@ class SequenceGenerator:
             frame_scale=self.motion.frame_scale,
             interpolation=self.motion.interpolation,
         )
+
+    def _scene_reference(self, entry) -> dict:
+        """How a sequence records the scene its animation must be replayed onto.
+
+        ``source_blend`` is the file the renderer opens.  Inside a project folder
+        that is the copy in ``scene/``, and the *relative* form is recorded too so
+        the folder keeps working after it is moved to a render node; the path the
+        scene originally came from is kept for traceability.
+        """
+        path = normalize_path(entry.path)
+        reference = {"source_blend": to_forward_slashes(path)}
+        original = str(getattr(entry, "original_path", "") or "")
+        if original and os.path.normcase(normalize_path(original)) != os.path.normcase(path):
+            reference["source_blend_original"] = to_forward_slashes(original)
+        layout = self.project_layout
+        if layout is not None:
+            relative = layout.relative_scene(path)
+            if relative:
+                reference["source_scene_rel"] = relative
+                reference["project_root"] = to_forward_slashes(layout.root)
+        return reference
 
     @staticmethod
     def camera_object(name: str):
@@ -432,12 +452,29 @@ class SequenceGenerator:
         generator = self._generator()
         base_matrix = original.matrix_world
         base_position = original.location
-        from ..camera.motion_templates import matrix_to_quaternion
+        from ..camera.motion_templates import matrix_to_quaternion, quat_angle_between, quat_multiply
 
         base_quaternion = matrix_to_quaternion(base_matrix)
 
-        def make_animation_for(position, quaternion=None):
+        def make_animation_for(position, quaternion=None, rotation_adjust=None):
+            """Animation anchored at ``position``, in the frame ``rotation_adjust`` gives.
+
+            The search may turn the camera to keep its subject framed.  Folding that
+            rotation into the **base matrix** is what keeps a template's notion of
+            "forward" pointing where the camera now looks: rotating only the keyed
+            quaternions afterwards left the path running along the *old* view axis,
+            so an accepted candidate moved the camera sideways (measured: 76-99 deg
+            off its own view axis on the user's scene).
+            """
             matrix = copy.deepcopy(base_matrix)
+            quaternion_result = quaternion
+            if rotation_adjust is not None and quat_angle_between(
+                rotation_adjust, (1.0, 0.0, 0.0, 0.0)
+            ) > 1e-9:
+                adjustment = _matrix_from_pose((0.0, 0.0, 0.0), rotation_adjust)
+                matrix = _matmul(adjustment, [[float(v) for v in row] for row in matrix])
+                if quaternion_result is None:
+                    quaternion_result = quat_multiply(rotation_adjust, base_quaternion)
             matrix[0][3] = float(position[0])
             matrix[1][3] = float(position[1])
             matrix[2][3] = float(position[2])
@@ -445,7 +482,7 @@ class SequenceGenerator:
                 request.template,
                 base_matrix=matrix,
                 base_focal=original.lens,
-                base_quaternion=quaternion if quaternion is not None else base_quaternion,
+                base_quaternion=quaternion_result if quaternion_result is not None else base_quaternion,
                 frame_start=self.motion.frame_start if self.motion.frame_end is not None else None,
                 frame_end=self.motion.frame_end,
             )
@@ -476,7 +513,7 @@ class SequenceGenerator:
                 search = CameraSearch(context, self.search_config, validator, logger=self.logger)
 
                 def make_animation(candidate):
-                    return make_animation_for(candidate.position)
+                    return make_animation_for(candidate.position, rotation_adjust=candidate.rotation_adjust)
 
                 search_result = search.search(
                     original,
@@ -495,7 +532,10 @@ class SequenceGenerator:
                     best = next(
                         (e for e in search_result.evaluations if e.candidate is winner), None
                     )
-                    animation = apply_candidate(make_animation_for(winner.position), winner)
+                    animation = apply_candidate(
+                        make_animation_for(winner.position, rotation_adjust=winner.rotation_adjust),
+                        winner,
+                    )
                     if best is not None:
                         report = best.report
                     run_log.log(f"camera search accepted: {winner.describe()}")
@@ -568,7 +608,6 @@ class SequenceGenerator:
     def _planned_files(self, output_dir: str, request: SequenceRequest) -> "dict[str, str]":
         sequence_id = request.sequence_folder
         files = {
-            "sequence_blend": os.path.join(output_dir, f"{sequence_id}.blend"),
             "sequence_config": os.path.join(output_dir, "sequence_config.json"),
             "metadata": os.path.join(output_dir, f"{sequence_id}.json"),
             "camera_trajectory": os.path.join(output_dir, f"{sequence_id}_camera.txt"),
@@ -579,13 +618,14 @@ class SequenceGenerator:
         return files
 
     def _can_skip(self, planned: "dict[str, str]", run_log: RunLogger) -> bool:
+        """Reuse an existing sequence only when every artifact it needs is present.
+
+        The sidecar carries the animation the renderer replays, so it and the
+        trajectory are the deliverables -- their absence always means "regenerate".
+        """
         if self.config.batch.overwrite or not self.config.batch.resume:
             return False
         required = ["sequence_config", "metadata", "camera_trajectory"]
-        if self.config.batch.save_sequence_blend:
-            # The blend is the deliverable the renderer consumes, so its absence
-            # means the sequence must be regenerated even when the rest exists.
-            required.append("sequence_blend")
         return all(os.path.isfile(planned[key]) for key in required if key in planned)
 
     def _place_character(self, request: SequenceRequest, run_log: RunLogger):
@@ -889,7 +929,7 @@ class SequenceGenerator:
             "has_character": bool(request.has_character),
             "character_name": request.character.id if request.character else "",
             "character_animation": getattr(request.animation, "id", "") or "",
-            "source_blend": to_forward_slashes(request.scene_entry.path),
+            **self._scene_reference(request.scene_entry),
             "generator_version": GENERATOR_VERSION,
             "created_utc": utc_now_iso(),
             "validation": report.to_dict(config=self.validation_config, include_frames=True) if report else None,
@@ -920,17 +960,13 @@ class SequenceGenerator:
         files: "dict[str, str]" = {}
         reason = ", ".join(report.failures) if report else ""
 
-        # -- sequence blend ------------------------------------------------
-        blend_path = os.path.join(output_dir, f"{sequence_id}.blend")
-        if self.config.batch.save_sequence_blend:
-            files["sequence_blend"] = self.save_sequence_blend(blend_path, run_log)
-        else:
-            # No scene copy: the sidecar carries the animation and the renderer
-            # replays it onto ``source_blend``.  See core/camera_animation.py.
-            run_log.log(
-                "sequence .blend saving disabled by configuration: writing an "
-                "animation-only sequence (the renderer needs the source scene)"
-            )
+        # No scene copy is ever written: the animation travels in the sidecar and the
+        # renderer replays it onto the scene shipped beside the sequence tree.  See
+        # core/camera_animation.py for the payload and why it is the keyed values.
+        run_log.log(
+            "writing an animation-only sequence (the renderer replays it onto the "
+            "scene recorded in sequence.source_blend)"
+        )
 
         # -- trajectory + metadata ----------------------------------------
         rows = build_trajectory_rows(
@@ -1054,30 +1090,6 @@ class SequenceGenerator:
         files["generation_log"] = self._write_log(run_log, output_dir)
         return files
 
-    def save_sequence_blend(self, path: str, run_log: RunLogger) -> str:
-        """Save the current session as an independent sequence file.
-
-        ``bpy.ops.wm.save_as_mainfile`` cannot be called from inside a
-        ``bpy.app.timers`` callback: Blender's file writer re-enters the main
-        loop and crashes with an access violation.  The panel therefore runs
-        with ``defer_blend_save`` enabled and hands the path back through
-        ``record_pending_blend`` for a later, safe flush.
-        """
-        if self.defer_blend_save:
-            self.record_pending_blend(path, run_log)
-            return ""
-        return write_sequence_blend(path, run_log)
-
-    def record_pending_blend(self, path: str, run_log: RunLogger) -> None:
-        """Queue a sequence ``.blend`` to be written outside the timer."""
-        target = normalize_path(path)
-        if target not in self.pending_blend_saves:
-            self.pending_blend_saves.append(target)
-            run_log.log(
-                "sequence .blend deferred until generation finishes "
-                "(saving from inside a Blender timer would crash)"
-            )
-
     def _sequence_config_payload(self, request, camera, animation, result, report) -> dict:
         payload = {
             "schema_version": self.config.schema_version,
@@ -1090,7 +1102,7 @@ class SequenceGenerator:
                 "character_name": request.character.id if request.character else "",
                 "character_animation": getattr(request.animation, "id", "") or "",
                 "character_status": result.character_status,
-                "source_blend": to_forward_slashes(request.scene_entry.path),
+                **self._scene_reference(request.scene_entry),
                 "output_dir": to_forward_slashes(result.output_dir),
                 "random_seed": int(self.search_config.random_seed),
             },
@@ -1172,76 +1184,6 @@ def find_sequence_files(root: str, *, recursive: bool = True) -> "list[dict]":
             if os.path.isdir(candidate) and os.path.isfile(os.path.join(candidate, "sequence_config.json")):
                 found.append(_describe_sequence_dir(candidate, root))
     return sorted(found, key=lambda item: item["sequence_dir"])
-
-
-def write_sequence_blend(path: str, run_log: "RunLogger | None" = None, *, compress: bool = True) -> str:
-    """Save the current Blender session as an independent sequence file.
-
-    Safe to call from an operator or the CLI; **never** call this from a
-    ``bpy.app.timers`` callback (see :meth:`SequenceGenerator.save_sequence_blend`).
-
-    The file is written **compressed** (zstd, the same thing Blender's *Compress
-    File* does).  A sequence is a full copy of the scene, so leaving compression
-    off inflated a 265.9 MB scene to 610.6 MB per sequence -- 10.1 GB for 17
-    sequences instead of 4.4 GB -- for no benefit, since Blender reads compressed
-    files transparently.  Measure a given scene with
-    ``tests/probe_blend_size.py``.
-
-    ``bpy.data.use_autopack`` is disabled for the duration of the write.  With it
-    on -- Blender's default, and what production files arrive with -- saving tries
-    to *pack* every unpacked external file, and one missing texture aborts the
-    whole save::
-
-        RuntimeError: 错误: 无法打包文件, 找不到源路径 '...WoodenSurface1_ambientocclusion.png'
-
-    That is a packaging concern, not a generation failure, and it must not cost
-    the sequence.  The flag is always restored, including on error.
-    """
-    import bpy
-
-    target = normalize_path(path)
-    ensure_dir(os.path.dirname(target))
-    before_file = bpy.data.filepath
-    autopack_before = bool(getattr(bpy.data, "use_autopack", False))
-    try:
-        if autopack_before:
-            bpy.data.use_autopack = False
-            if run_log is not None:
-                run_log.log(
-                    "disabled bpy.data.use_autopack for this save: packing every "
-                    "external file would fail on any missing asset"
-                )
-        try:
-            bpy.ops.wm.save_as_mainfile(
-                filepath=target,
-                check_existing=False,
-                copy=True,          # keep the session's current file untouched
-                compress=bool(compress),
-            )
-        except TypeError:
-            bpy.ops.wm.save_as_mainfile(filepath=target, check_existing=False)
-    finally:
-        if autopack_before:
-            try:
-                bpy.data.use_autopack = True
-            except Exception:
-                pass
-        # Blender may rename the active file; keep working in the original context.
-        if before_file and bpy.data.filepath != before_file:
-            try:
-                bpy.data.filepath = before_file
-            except Exception:
-                pass
-    if run_log is not None:
-        try:
-            written = os.path.getsize(target)
-            run_log.log(
-                f"saved sequence blend: {target} "
-                f"({written / (1024 * 1024):.1f} MB, compress={bool(compress)})"
-            )
-        except OSError:
-            run_log.log(f"saved sequence blend: {target}")
-    return target
 
 
 def _describe_sequence_dir(directory: str, root: str) -> dict:

@@ -3,12 +3,19 @@
 Runs *inside* Blender, because generating a sequence requires a live scene::
 
     blender -b -P motion_pipeline_cli.py -- \
-        --config batch.json --scenes "E:\\scenes\\room001.blend" --output-root "D:\\generated"
+        --config batch.json --scenes "E:\\scenes\\room001.blend" --output-root "D:\\projects"
 
     blender -b "E:\\scenes\\room001.blend" -P motion_pipeline_cli.py -- \
-        --output-root "D:\\generated" --motion-filter "dolly_*" --dry-run
+        --output-root "D:\\projects" --motion-filter "dolly_*" --dry-run
 
     blender -b -P motion_pipeline_cli.py -- --print-config
+
+``--output-root`` is a **project folder**, not a sequence folder: the run creates
+``<output-root>/blender_camera_<date>/`` holding ``sequence/`` (the sequence tree),
+``scene/`` (a copy of every source ``.blend``) and ``video/``, plus the headless
+renderer, the package it imports and a README with the exact render command.  That
+folder is what gets zipped to a render node.  ``--sequence-root`` still writes the
+bare sequence tree when a script wants exactly that.
 
 Every stage of the pipeline is reachable without the GUI, which is what makes the
 "generate on a workstation, render on a farm" split in the brief possible.
@@ -82,6 +89,8 @@ def build_parser() -> argparse.ArgumentParser:
         description="Generate camera-motion sequences from .blend scenes without the GUI.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
+    # Set by --sequence-root: write the bare sequence tree instead of a project folder.
+    parser.set_defaults(no_project_layout=False)
     source = parser.add_argument_group("scenes")
     source.add_argument("--scenes", action="append", default=[], metavar="PATH",
                         help=".blend file to process (repeatable)")
@@ -113,12 +122,15 @@ def build_parser() -> argparse.ArgumentParser:
                         help="scale template frame numbers (0.5 = half speed)")
 
     output = parser.add_argument_group("output")
-    output.add_argument("--output-root", default="", help="where the sequence tree is written")
+    output.add_argument("--output-root", default="",
+                        help="project folder: <root>/blender_camera_<date>/{sequence,scene,video} is created in it")
+    output.add_argument("--sequence-root", default="",
+                        help="write the sequence tree straight into this folder (no project layout)")
     output.add_argument("--overwrite", action="store_true", help="regenerate sequences that already exist")
     output.add_argument("--no-resume", dest="resume", action="store_false", default=None,
                         help="do not reuse existing artifacts")
     output.add_argument("--no-sequence-blend", dest="save_sequence_blend", action="store_false", default=None,
-                        help="skip writing sequence_*.blend")
+                        help="accepted for backwards compatibility; sequence .blend copies were removed")
     output.add_argument("--no-validation-report", dest="save_validation_report",
                         action="store_false", default=None, help="skip validation_report.json")
 
@@ -181,6 +193,10 @@ def build_config(args) -> BatchConfig:
 
     if args.output_root:
         config.batch.output_root = normalize_path(args.output_root)
+    if args.sequence_root:
+        # Escape hatch for scripted runs that want the bare sequence tree.
+        config.batch.output_root = normalize_path(args.sequence_root)
+        args.no_project_layout = True
     if args.character_mode:
         config.batch.mode = args.character_mode
     if args.character_root:
@@ -193,8 +209,8 @@ def build_config(args) -> BatchConfig:
         config.batch.overwrite = True
     if args.resume is not None:
         config.batch.resume = bool(args.resume)
-    if args.save_sequence_blend is not None:
-        config.batch.save_sequence_blend = bool(args.save_sequence_blend)
+    # ``--no-sequence-blend`` is a no-op: sequences are always animation-only, so
+    # no per-sequence ``.blend`` is written and nothing needs configuring.
     if args.save_validation_report is not None:
         config.batch.save_validation_report = bool(args.save_validation_report)
     if args.path_map:
@@ -376,6 +392,7 @@ def command_validate(config: BatchConfig, entries, args) -> int:
 
 def command_run(config: BatchConfig, entries, args) -> int:
     from blender_motion_pipeline.core.batch_runner import BatchRunner
+    from blender_motion_pipeline.core.project import ProjectError, create_project
     from blender_motion_pipeline.utils.task_control import TaskController
 
     task = TaskController(name="cli")
@@ -409,7 +426,24 @@ def command_run(config: BatchConfig, entries, args) -> int:
         LOGGER.warning("%s", problem)
 
     if args.dry_run:
-        return _dry_run_matrix(config, entries, runner)
+        # A dry run must not touch the disk, so the project folder is only
+        # created for a real run.
+        return _dry_run_matrix(config, entries, runner, args)
+
+    # A run writes one project folder (sequence tree + scene copies + render
+    # toolkit) unless --sequence-root asked for a bare sequence tree.
+    if not getattr(args, "no_project_layout", False):
+        from blender_motion_pipeline.core.project import ProjectError, create_project
+
+        try:
+            runner.project_layout = create_project(config.batch.output_root, logger=LOGGER)
+        except ProjectError as exc:
+            print(f"  PROBLEM: {exc}")
+            return 1
+        runner.project_root = runner.project_layout.root
+        runner.output_root = runner.project_layout.sequence_root
+        print(f"project folder: {runner.project_layout.root}")
+        print(runner.project_layout.describe(indent="    "))
 
     report = runner.run()
     print()
@@ -419,7 +453,7 @@ def command_run(config: BatchConfig, entries, args) -> int:
     return 0 if report.ok else 1
 
 
-def _dry_run_matrix(config: BatchConfig, entries, runner) -> int:
+def _dry_run_matrix(config: BatchConfig, entries, runner, args=None) -> int:
     """Report the scene x motion x camera x character matrix without writing."""
     from blender_motion_pipeline.camera.motion_templates import MotionTemplateLibrary
     from blender_motion_pipeline.character.base_provider import character_variants
@@ -438,7 +472,16 @@ def _dry_run_matrix(config: BatchConfig, entries, runner) -> int:
         f"\ndry run: {len(entries)} scene(s) x {len(library)} motion(s) x "
         f"{len(variants)} character variant(s)"
     )
-    print(f"  output root   : {to_forward_slashes(config.batch.output_root)}")
+    if getattr(args, "no_project_layout", False):
+        print(f"  sequence root : {to_forward_slashes(config.batch.output_root)}")
+    else:
+        from blender_motion_pipeline.core.project import project_folder_name
+
+        print(f"  project root  : {to_forward_slashes(config.batch.output_root)}")
+        print(
+            "  project folder: "
+            f"{to_forward_slashes(os.path.join(config.batch.output_root, project_folder_name()))}"
+        )
     print(f"  templates     : {library.source} ({len(library)})")
     print(f"  provider      : {provider.name} / {provider.status()}")
     total = 0

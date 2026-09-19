@@ -61,6 +61,10 @@ class UITaskState:
         self.failures: "list[dict]" = []
         self.setup: dict = {}
         self._opened_scene: str = ""
+        #: The project folder this run writes into (``None`` until ``begin``).
+        self.project_layout = None
+        #: ``sequence/`` inside the project folder.
+        self.output_root: str = ""
 
     # -- lifecycle -------------------------------------------------------
     def begin(
@@ -76,6 +80,7 @@ class UITaskState:
         from ..character import build_character_provider
         from ..character.base_provider import character_variants, summarise_variants
         from ..io.path_utils import parse_path_mappings
+        from .project import ProjectError, create_project
 
         if self.is_running():
             raise RuntimeError("a generation task is already running")
@@ -87,6 +92,23 @@ class UITaskState:
         self.stage = "loading motion templates"
         self.started_at = time.time()
         self.camera_selection = camera_selection or "all"
+
+        # One project folder per run: the sequence tree, a copy of every scene it
+        # was generated from and the headless render toolkit, so the folder can be
+        # zipped to a render node as it is.
+        self.project_layout = create_project(config.batch.output_root, logger=LOGGER)
+        self.output_root = self.project_layout.sequence_root
+        self.stage = "copying scenes into the project"
+        self.scenes = [entry for entry in entries if entry.enabled]
+        for entry in self.scenes:
+            if getattr(entry, "original_path", ""):
+                continue
+            try:
+                copy = self.project_layout.stage_scene(entry.path, logger=LOGGER)
+            except Exception as exc:  # OSError / ProjectError
+                raise ProjectError(f"scene could not be copied into the project: {entry.path} ({exc})")
+            entry.original_path = entry.path
+            entry.path = copy
 
         library = MotionTemplateLibrary.from_config(config.motion, logger=LOGGER)
         self._apply_motion_filter(library, config.motion.template_names)
@@ -105,15 +127,12 @@ class UITaskState:
         self.variants = character_variants(config.batch.mode, provider, logger=LOGGER)
         self.generator = SequenceGenerator(
             config,
-            output_root=config.batch.output_root,
+            output_root=self.output_root,
             character_provider=provider,
             logger=LOGGER,
             task=self.controller,
+            project_layout=self.project_layout,
         )
-        # Timer-driven runs must not call save_as_mainfile (it crashes Blender),
-        # so sequence .blend writes are queued for a later flush.
-        self.generator.defer_blend_save = True
-        self.scenes = [entry for entry in entries if entry.enabled]
         self.controller.set_total(0, stage="queued")
         self.state = "running"
         self.stage = "queued"
@@ -127,6 +146,9 @@ class UITaskState:
             "camera_selection": self.camera_selection,
             "warnings": list(library.warnings),
             "scenes": {},
+            "project_root": self.project_layout.project_root,
+            "project_folder": self.project_layout.root,
+            "output_root": self.output_root,
         }
         LOGGER.info(
             "panel generation queued: %d scene(s), %d template(s), %s",
@@ -183,10 +205,44 @@ class UITaskState:
             "cancelled": "cancelled",
         }.get(state, state)
         self.finished_at = time.time()
+        self.finalise_project()
         LOGGER.info(
             "panel generation %s: %d generated, %d failed, %d skipped in %.1fs",
             state, self.generated, self.failed, self.skipped, self.elapsed,
         )
+
+    def finalise_project(self) -> None:
+        """Write the project README and manifest once the run is over.
+
+        Best-effort: a generation that produced sequences must not be reported as
+        failed because a documentation file could not be written.
+        """
+        layout = self.project_layout
+        if layout is None:
+            return
+        try:
+            from .project import blender_version
+
+            version = blender_version()
+            scenes = [
+                layout.relative_scene(target) or target
+                for _, target in layout.scene_copies
+            ]
+            layout.write_readme(scenes=[name for name in scenes if name], blender_version=version)
+            layout.write_manifest(
+                metadata={
+                    "character_mode": self.config.batch.mode if self.config else "",
+                    "camera_selection": self.camera_selection,
+                    "generated": int(self.generated),
+                    "failed": int(self.failed),
+                    "skipped": int(self.skipped),
+                    "output_root": self.output_root,
+                },
+                blender_version=version,
+            )
+            self.setup["project"] = layout.to_dict()
+        except Exception as exc:  # pragma: no cover - defensive
+            LOGGER.warning("could not finalise the project folder: %s", exc)
 
     # -- stepping --------------------------------------------------------
     def step(self) -> bool:
@@ -367,41 +423,11 @@ class UITaskState:
             return 1.0
         return min(1.0, done / float(total))
 
-    # -- deferred sequence blends ----------------------------------------
-    @property
-    def pending_blends(self) -> "list[str]":
-        """Sequence ``.blend`` files still waiting to be written."""
-        if self.generator is None:
-            return []
-        return list(self.generator.pending_blend_saves)
-
-    def flush_pending_blends(self, *, limit: int = 0) -> "list[str]":
-        """Write queued sequence blends.  Safe outside a timer callback.
-
-        Reopens nothing: each pending path is written from the scene as it
-        stands at flush time, so a flush that happens after the batch moved on
-        produces a blend for the *last* processed sequence only.  The batch
-        runner (non-timer path) never defers, and the panel flushes whenever it
-        gets a chance, which keeps this a best-effort convenience rather than a
-        correctness-critical path.
-        """
-        if self.generator is None:
-            return []
-        written: "list[str]" = []
-        pending = self.generator.pending_blend_saves
-        budget = pending if not limit else pending[:limit]
-        remaining = [path for path in pending if path not in budget]
-        self.generator.pending_blend_saves = []
-        from .sequence_generator import write_sequence_blend
-
-        for path in budget:
-            try:
-                written.append(write_sequence_blend(path))
-            except Exception as exc:
-                LOGGER.warning("could not write %s: %s", path, exc)
-                remaining.append(path)
-        self.generator.pending_blend_saves = remaining
-        return written
+    # -- (sequence blends are not written any more) ----------------------
+    # Sequences store the camera animation and the renderer replays it onto the
+    # scene shipped beside them, so there is nothing to defer out of a timer: the
+    # old "queue the .blend writes until the run ends" machinery went with the
+    # scene-copy mode.
 
     def snapshot(self) -> dict:
         return {
@@ -416,6 +442,8 @@ class UITaskState:
             "elapsed_seconds": round(self.elapsed, 3),
             "failure_count": len(self.failures),
             "setup": dict(self.setup),
+            "project_folder": self.project_layout.root if self.project_layout else "",
+            "output_root": self.output_root,
         }
 
     def failure_list(self) -> "list[dict]":
@@ -465,14 +493,6 @@ def failures() -> "list[dict]":
     return _singleton.failure_list()
 
 
-def pending_blends() -> "list[str]":
-    return _singleton.pending_blends
-
-
-def flush_pending_blends(*, limit: int = 0) -> "list[str]":
-    return _singleton.flush_pending_blends(limit=limit)
-
-
 def reset() -> None:
     _singleton.reset()
 
@@ -488,9 +508,7 @@ __all__ = [
     "begin",
     "failures",
     "finish",
-    "flush_pending_blends",
     "is_running",
-    "pending_blends",
     "request_cancel",
     "reset",
     "snapshot",

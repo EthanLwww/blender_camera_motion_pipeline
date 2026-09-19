@@ -84,7 +84,12 @@ in the reference's style loads without editing.
 `<asset_root>/<map>/<sequence>/` with per-sequence JSON + TXT beside the render,
 and the add-on's `Saved/MetaHumanPipeline` folder for intermediates. The three
 level `scene/motion/sequence` tree here is the direct analogue required by the
-brief, with the same "metadata travels with the render" principle.
+brief, with the same "metadata travels with the render" principle. One folder is
+added around it: a run writes `<project>/blender_camera_<date>/` holding
+`sequence/` (that tree), `scene/` (a copy of every source `.blend`, because a
+sequence stores the camera animation rather than a scene copy) and `video/`, plus
+the headless renderer and the package it imports — so the folder can be zipped to
+a render node as it stands.
 
 ## 3. `movie_render.py` (Unreal headless renderer)
 

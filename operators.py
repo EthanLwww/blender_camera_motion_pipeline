@@ -87,6 +87,40 @@ def _entries(group) -> "list[SceneEntry]":
     ]
 
 
+def _project_root(group) -> str:
+    """The folder the user picked; the dated project folder lives inside it."""
+    return group.output_root or group.last_output_root
+
+
+def _project_target(group) -> str:
+    """The folder to open: the project folder of the last run, or its parent.
+
+    ``last_project_folder`` is set when a run starts, but the scene it lives on is
+    replaced whenever a queued ``.blend`` is opened -- so the newest
+    ``blender_camera_*`` folder under the project root is the fallback.
+    """
+    known = getattr(group, "last_project_folder", "")
+    if known and os.path.isdir(known):
+        return known
+    root = _project_root(group)
+    if not root or not os.path.isdir(root):
+        return root
+    from .core.project import PROJECT_PREFIX
+
+    candidates = []
+    try:
+        for name in os.listdir(root):
+            path = os.path.join(root, name)
+            if name.startswith(PROJECT_PREFIX) and os.path.isdir(path):
+                candidates.append((os.path.getmtime(path), path))
+    except OSError:
+        return root
+    if not candidates:
+        return root
+    candidates.sort()
+    return candidates[-1][1]
+
+
 def remember_settings(group) -> str:
     """Store the panel configuration where the next scene can find it.
 
@@ -580,7 +614,8 @@ class MPP_OT_check_configuration(_MPPBase, Operator):
                 problems.append(f"missing scene file: {entry.path}")
         missing = sum(1 for entry in entries if not entry.exists)
         lines.append(f"scenes: {len(entries)} queued, {missing} missing")
-        lines.append(f"output: {to_forward_slashes(config.batch.output_root) or '(unset)'}")
+        lines.append(f"project folder: {to_forward_slashes(group.project_folder()) or '(unset)'}")
+        lines.append("  sequence/ + scene/ + video/ + render toolkit are created in it")
         lines.append(
             f"validation: {'on' if config.validation.enabled else 'off'}, "
             f"step {config.validation.sample_step}, clearance {config.validation.clearance}"
@@ -840,13 +875,9 @@ def _generation_tick():
 
 
 def _finish_panel() -> None:
-    """Flush deferred writes and push the final status into the panel."""
+    """Push the final status into the panel and put the user's settings back."""
     from .core import ui_task
 
-    try:
-        _flush_deferred_blends()
-    except Exception:
-        LOGGER.debug("deferred blend flush failed", exc_info=True)
     try:
         # The run opened every queued scene, so the scene on screen now is not the
         # one the user configured.  Put their settings back before they look.
@@ -860,38 +891,6 @@ def _finish_panel() -> None:
     except Exception:
         LOGGER.debug("could not refresh the panel at the end of a run", exc_info=True)
     del ui_task
-
-
-def _flush_deferred_blends() -> int:
-    """Write sequence blends that were queued during a timer-driven run.
-
-    Only the *final* scene state is available at this point, so a blend written
-    here represents the last processed sequence.  The CLI/batch path never
-    defers and writes an exact blend per sequence; this keeps the panel usable
-    without risking the crash described in ``core.sequence_generator``.
-    """
-    from .core import ui_task
-
-    pending = list(ui_task.pending_blends())
-    if not pending:
-        return 0
-    written = ui_task.flush_pending_blends()
-    remaining = len(ui_task.pending_blends())
-    if written:
-        LOGGER.info("wrote %d deferred sequence blend(s)", len(written))
-        try:
-            group = _panel_group()
-            group.last_report = f"{group.last_report} | wrote {len(written)} sequence .blend file(s)"
-        except Exception:
-            pass
-    if remaining:
-        LOGGER.warning(
-            "%d sequence .blend file(s) could not be written from the panel; use "
-            "motion_pipeline_cli.py (which writes one blend per sequence) or "
-            "disable 'Save sequence .blend'",
-            remaining,
-        )
-    return len(written)
 
 
 def _sync_panel(group=None, snapshot: "dict | None" = None) -> None:
@@ -997,6 +996,7 @@ class MPP_OT_start_generation(_MPPBase, Operator):
         group.skipped_count = 0
         group.character_status = (setup.get("provider") or {}).get("status", "")
         group.last_output_root = config.batch.output_root
+        group.last_project_folder = setup.get("project_folder", "")
         group.last_report = (
             f"Generating from {setup['scene_count']} scene(s) with "
             f"{setup['template_count']} template(s); {setup['variants']}."
@@ -1029,22 +1029,22 @@ class MPP_OT_stop_task(_MPPBase, Operator):
 
 
 class MPP_OT_open_output_directory(_MPPBase, Operator):
-    """Open the output folder in the system file browser"""
+    """Open the project folder in the system file browser"""
 
     bl_idname = "mpp.open_output_directory"
-    bl_label = "Open output folder"
+    bl_label = "Open project folder"
 
     def execute(self, context):
         group = _group(context)
-        target = group.output_root or group.last_output_root
+        target = _project_target(group)
         if not target:
-            return self.fail(group, "No output folder is configured")
+            return self.fail(group, "No project folder is configured")
         target = normalize_path(target)
         if not os.path.isdir(target):
             try:
                 ensure_dir(target)
             except OSError as exc:
-                return self.fail(group, f"Output folder is not writable: {exc}")
+                return self.fail(group, f"Project folder is not writable: {exc}")
         try:
             bpy.ops.wm.path_open(filepath=target)
         except Exception as exc:
@@ -1283,10 +1283,15 @@ class MPP_OT_load_render_sequences(_MPPBase, Operator):
             item.detail = problems[0] if problems else detail
         group.render_list_index = 0 if len(group.render_list) else -1
         if not group.render_output_root:
-            # Pre-fill the save folder so Render is one click away.
-            group.render_output_root = os.path.join(
-                os.path.dirname(root.rstrip("\\/")) or root, "render_output"
-            )
+            # Pre-fill the save folder so Render is one click away -- and use the
+            # project's own video/ folder when the sequence root is a project tree.
+            from .core.project import SEQUENCE_DIRNAME
+
+            parent = os.path.dirname(root.rstrip("\\/")) or root
+            if os.path.basename(root.rstrip("\\/")).lower() == SEQUENCE_DIRNAME:
+                group.render_output_root = os.path.join(parent, "video")
+            else:
+                group.render_output_root = os.path.join(parent, "render_output")
         if not found:
             return self.fail(group, f"No sequences found under {to_forward_slashes(root)}")
         ready = sum(1 for item in group.render_list if item.state == "pending")

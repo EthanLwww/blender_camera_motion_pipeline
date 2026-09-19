@@ -38,6 +38,9 @@ class SceneEntry:
     note: str = ""
     camera_count: int = 0
     scene_names: "list[str]" = field(default_factory=list)
+    #: Where ``path`` came from before a project folder copied it into ``scene/``.
+    #: Empty when the file is used in place (which is what the tests do).
+    original_path: str = ""
 
     def __post_init__(self):
         self.path = normalize_path(self.path)
@@ -49,7 +52,7 @@ class SceneEntry:
         return os.path.isfile(self.path)
 
     def to_dict(self) -> dict:
-        return {
+        payload = {
             "path": to_forward_slashes(self.path),
             "name": self.name,
             "enabled": bool(self.enabled),
@@ -58,6 +61,9 @@ class SceneEntry:
             "camera_count": int(self.camera_count),
             "scene_names": list(self.scene_names),
         }
+        if self.original_path:
+            payload["source_blend_original"] = to_forward_slashes(self.original_path)
+        return payload
 
     @classmethod
     def from_dict(cls, raw: dict) -> "SceneEntry":

@@ -354,12 +354,14 @@ def build_candidates(
 
 
 def apply_candidate(animation: MotionAnimation, candidate: SearchCandidate) -> MotionAnimation:
-    """Return a copy of ``animation`` with the candidate's adjustment baked in.
+    """Return a copy of ``animation`` with the candidate's **focal** step applied.
 
-    Position is already expressed by the candidate (callers regenerate the
-    animation around ``candidate.position``); this only folds in the orientation
-    nudge and the focal-length step so the validator sees exactly what would be
-    keyframed.
+    Orientation is *not* applied here: the caller's ``make_animation`` callback
+    receives the candidate and folds ``candidate.rotation_adjust`` into the base
+    matrix, so the template's offsets are built in the rotated frame.  Rotating the
+    keyed quaternions here as well (which is what this function used to do) both
+    double-applied the turn and left the path pointing along the pre-rotation view
+    axis -- an accepted candidate then moved the camera sideways instead of forward.
     """
     samples = []
     for sample in animation.samples:
@@ -367,7 +369,7 @@ def apply_candidate(animation: MotionAnimation, candidate: SearchCandidate) -> M
             type(sample)(
                 frame=sample.frame,
                 position=sample.position,
-                quaternion=quat_multiply(candidate.rotation_adjust, sample.quaternion),
+                quaternion=sample.quaternion,
                 focal=sample.focal * candidate.focal_scale,
                 template_offset=sample.template_offset,
                 template_rotation=sample.template_rotation,

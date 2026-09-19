@@ -44,30 +44,45 @@ import traceback
 # make the add-on package importable when this file is run by Blender
 # --------------------------------------------------------------------------
 # This script may be run in place (``<package>/render/render_sequences.py``),
-# copied somewhere beside the package, or shipped to a render node -- and the
-# package folder may be called anything.  ``_bootstrap`` (next to the package
-# ``__init__.py``) finds the package root, puts its parent on ``sys.path`` and
-# makes the name used by the imports below resolve to it.
+# copied somewhere beside the package, shipped to a render node, or copied to the
+# root of a generated project folder (where the package sits in a *subfolder*) --
+# and the package folder may be called anything.  ``_bootstrap`` (next to the
+# package ``__init__.py``) finds the package root, puts its parent on ``sys.path``
+# and makes the name used by the imports below resolve to it.
+def _find_bootstrap(start: str) -> str:
+    """Nearest ``_bootstrap.py``: beside the script, one level up, or one level down.
+
+    The last case is the generated project folder, which ships
+    ``render_sequences.py`` and ``<package>/_bootstrap.py`` side by side.
+    """
+    here = os.path.abspath(start)
+    if not os.path.isdir(here):
+        here = os.path.dirname(here)
+    candidates = [os.path.join(here, "_bootstrap.py")]
+    candidates.append(os.path.join(os.path.dirname(here), "_bootstrap.py"))
+    try:
+        for name in sorted(os.listdir(here)):
+            candidates.append(os.path.join(here, name, "_bootstrap.py"))
+    except OSError:
+        pass
+    for candidate in candidates:
+        if os.path.isfile(candidate):
+            return candidate
+    return ""
+
+
 def _ensure_package_importable(start: str) -> str:
     import importlib.util
 
-    here = os.path.abspath(start)
-    current = here
-    for _ in range(6):
-        candidate = os.path.join(current, "_bootstrap.py")
-        if os.path.isfile(candidate):
-            spec = importlib.util.spec_from_file_location("_mpp_bootstrap", candidate)
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            root = module.bootstrap(candidate)
-            if root:
-                return os.path.dirname(module.package_root(candidate))
-        if os.path.isdir(os.path.join(current, "_bootstrap.py")):
-            break
-        parent = os.path.dirname(current)
-        if parent == current:
-            break
-        current = parent
+    found = _find_bootstrap(start)
+    if found:
+        spec = importlib.util.spec_from_file_location("_mpp_bootstrap", found)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        root = module.bootstrap(found)
+        if root:
+            return os.path.dirname(module.package_root(found))
+    here = os.path.dirname(os.path.abspath(start))
     if here not in sys.path:
         sys.path.insert(0, here)
     return here

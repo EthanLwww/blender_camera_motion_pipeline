@@ -217,6 +217,12 @@ def live_status(context=None) -> dict:
         payload["generated"] = snapshot.get("generated", payload.get("generated", 0))
         payload["failed"] = snapshot.get("failed", payload.get("failed", 0))
         payload["skipped"] = snapshot.get("skipped", payload.get("skipped", 0))
+    # The project folder the run writes into: it only exists while a task is loaded
+    # (the panel group lives on a scene, and generation replaces the scene), so the
+    # live snapshot is the only place that can answer for it.
+    if snapshot.get("project_folder"):
+        payload["project_folder"] = snapshot["project_folder"]
+        payload["output_root"] = snapshot.get("output_root") or payload.get("output_root", "")
     return payload
 
 

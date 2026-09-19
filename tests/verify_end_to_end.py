@@ -24,6 +24,8 @@ _PACKAGE_ROOT = os.path.dirname(_HERE)
 _WORKSPACE = os.path.dirname(_PACKAGE_ROOT)
 if _WORKSPACE not in sys.path:
     sys.path.insert(0, _WORKSPACE)
+sys.path.insert(0, _HERE)
+import _boot  # noqa: E402,F401  (the add-on folder may be called anything)
 
 def _resolve_blender() -> str:
     """The Blender *executable*, not the Python interpreter.
@@ -45,7 +47,7 @@ def _resolve_blender() -> str:
 
 
 BLENDER = _resolve_blender()
-PACKAGE = os.path.join(_WORKSPACE, "blender_motion_pipeline")
+PACKAGE = _PACKAGE_ROOT
 WORK = os.path.join(tempfile.gettempdir(), "motion_pipeline_e2e")
 SCENES = os.path.join(WORK, "scenes")
 GENERATED = os.path.join(WORK, "generated")
@@ -54,6 +56,23 @@ REFERENCE_TEMPLATES = os.path.join(
     r"E:\UE\DataGenScenes\Plugins\MetaHumanScenePipeline\Templates",
     "camera_motion_templates.json",
 )
+
+#: The dated project folder the generation step creates inside ``GENERATED``.
+PROJECT = ""
+
+
+def project_folder() -> str:
+    """Newest ``blender_camera_*`` folder under ``GENERATED`` ("" when not there)."""
+    if not os.path.isdir(GENERATED):
+        return ""
+    from blender_motion_pipeline.core.project import PROJECT_PREFIX
+
+    found = sorted(
+        os.path.join(GENERATED, name)
+        for name in os.listdir(GENERATED)
+        if name.startswith(PROJECT_PREFIX) and os.path.isdir(os.path.join(GENERATED, name))
+    )
+    return found[-1] if found else ""
 
 STEPS: "list[tuple[str, bool, str]]" = []
 
@@ -190,6 +209,8 @@ def step_dry_run() -> str:
 
 
 def step_generate(config_path: str) -> str:
+    global PROJECT
+
     cli = os.path.join(PACKAGE, "motion_pipeline_cli.py")
     code, out, _err = run_blender(
         cli,
@@ -197,16 +218,61 @@ def step_generate(config_path: str) -> str:
          "--report", os.path.join(WORK, "cli_report.json")],
         timeout=1800,
     )
+    PROJECT = project_folder()
     sequences = []
-    for current, _dirs, files in os.walk(GENERATED):
+    for current, _dirs, files in os.walk(os.path.join(PROJECT, "sequence")):
         if "sequence_config.json" in files:
             sequences.append(current)
     record(
         "3. CLI generated sequences (real 80-template document)",
         code == 0 and len(sequences) >= 3,
-        f"{len(sequences)} sequence folder(s)",
+        f"{len(sequences)} sequence folder(s) in {PROJECT}",
     )
-    return GENERATED if code == 0 else "generation failed"
+    return PROJECT if code == 0 else "generation failed"
+
+
+def step_check_project(project: str) -> None:
+    """The folder must be renderable on another machine as it stands."""
+    problems = []
+    for directory in ("sequence", "scene", "video"):
+        if not os.path.isdir(os.path.join(project, directory)):
+            problems.append(f"missing {directory}/")
+    for name in ("render_sequences.py", "project.json", "RENDER_README.md",
+                 "render_project.bat", "render_project.sh"):
+        if not os.path.isfile(os.path.join(project, name)):
+            problems.append(f"missing {name}")
+    if not os.path.isdir(os.path.join(project, "blender_camera_motion_pipeline")):
+        problems.append("the package the renderer imports was not copied")
+    copies = sorted(os.listdir(os.path.join(project, "scene"))) if os.path.isdir(
+        os.path.join(project, "scene")) else []
+    if len(copies) != 3:
+        problems.append(f"expected 3 scene copies, found {len(copies)}: {copies}")
+    # Every sequence must record the *copy* it was generated from, in absolute and
+    # project-relative form.
+    checked = 0
+    for current, _dirs, files in os.walk(os.path.join(project, "sequence")):
+        if "sequence_config.json" not in files:
+            continue
+        checked += 1
+        with open(os.path.join(current, "sequence_config.json"), encoding="utf-8") as handle:
+            payload = json.load(handle)
+        sequence = payload.get("sequence") or {}
+        recorded = sequence.get("source_blend") or ""
+        relative = sequence.get("source_scene_rel") or ""
+        if os.path.normcase(os.path.dirname(recorded)) != os.path.normcase(
+            os.path.join(project, "scene")
+        ):
+            problems.append(f"{current}: source_blend is not the project's scene copy: {recorded}")
+        if not relative or not os.path.isfile(os.path.join(project, relative)):
+            problems.append(f"{current}: source_scene_rel does not resolve inside the project: {relative}")
+    record(
+        "4. the project folder is self-contained (scene copies + render toolkit)",
+        not problems and checked >= 3 and len(copies) == 3,
+        f"{checked} sequence(s), {len(copies)} scene copy/copies"
+        + (f"; {problems[0]}" if problems else ""),
+    )
+    for problem in problems[:5]:
+        print("     !", problem)
 
 
 def step_check_artifacts(root: str) -> str:
@@ -217,8 +283,9 @@ def step_check_artifacts(root: str) -> str:
             continue
         checked += 1
         name = os.path.basename(current)
+        # Animation-only sequences carry no scene copy: the .blend they replay onto
+        # is the one shipped in the project's scene/ folder.
         for expected in (
-            f"{name}.blend",
             "sequence_config.json",
             f"{name}.json",
             f"{name}_camera.txt",
@@ -246,7 +313,7 @@ def step_check_artifacts(root: str) -> str:
             elif len(lines) - 1 != 81:
                 problems.append(f"{trajectory}: {len(lines) - 1} rows, expected 81")
     record(
-        "4. generated artifacts match the documented layout",
+        "5. generated artifacts match the documented layout",
         not problems and checked >= 3,
         f"{checked} sequence(s) checked" + (f"; {problems[0]}" if problems else ""),
     )
@@ -256,11 +323,18 @@ def step_check_artifacts(root: str) -> str:
 
 
 def step_render() -> str:
-    script = os.path.join(PACKAGE, "render", "render_sequences.py")
+    """Render the project with *its own* copy of the renderer.
+
+    Nothing about the developer's machine is allowed to matter here: the script is
+    the one shipped inside the project folder, it imports the package copied beside
+    it, it discovers the scenes through the recorded relative path, and it writes
+    into the project's own ``video/`` folder.
+    """
+    script = os.path.join(PROJECT, "render_sequences.py")
     code, out, _err = run_blender(
         script,
-        ["--input-root", GENERATED,
-         "--output-root", RENDERED,
+        ["--input-root", os.path.join(PROJECT, "sequence"),
+         "--output-root", os.path.join(PROJECT, "video"),
          "--resolution-x", "320",
          "--resolution-y", "180",
          "--engine", "BLENDER_WORKBENCH",
@@ -268,16 +342,16 @@ def step_render() -> str:
         timeout=1800,
     )
     videos = []
-    for current, _dirs, files in os.walk(RENDERED):
+    for current, _dirs, files in os.walk(os.path.join(PROJECT, "video")):
         videos.extend(
             os.path.join(current, name) for name in files if name.endswith(".mp4")
         )
     record(
-        "5. headless render produced videos",
+        "6. headless render produced videos into the project's video/ folder",
         code == 0 and len(videos) >= 3,
-        f"{len(videos)} video(s)",
+        f"{len(videos)} video(s) in {os.path.join(PROJECT, 'video')}",
     )
-    return RENDERED if code == 0 else "render failed"
+    return os.path.join(PROJECT, "video") if code == 0 else "render failed"
 
 
 def step_render_artifacts(root: str) -> str:
@@ -305,7 +379,7 @@ def step_render_artifacts(root: str) -> str:
                 if not payload.get("camera_trajectory"):
                     problems.append(f"{sidecar}: empty camera_trajectory")
     record(
-        "6. every video has its JSON + trajectory TXT beside it",
+        "7. every video has its JSON + trajectory TXT beside it",
         not problems and triples >= 3,
         f"{triples} sequence output folder(s)" + (f"; {problems[0]}" if problems else ""),
     )
@@ -317,7 +391,7 @@ def step_render_artifacts(root: str) -> str:
 def step_ffprobe(root: str) -> None:
     ffprobe = shutil.which("ffprobe")
     if not ffprobe:
-        record("7. video streams decode (ffprobe)", True, "ffprobe not on PATH; skipped")
+        record("8. video streams decode (ffprobe)", True, "ffprobe not on PATH; skipped")
         return
     videos = []
     for current, _dirs, files in os.walk(root):
@@ -339,23 +413,24 @@ def step_ffprobe(root: str) -> None:
         elif int(streams[0].get("nb_frames") or 0) != 81:
             problems.append(f"{video}: {streams[0].get('nb_frames')} frames, expected 81")
     record(
-        "7. video streams decode with the expected frame count",
+        "8. video streams decode with the expected frame count",
         not problems,
         f"{len(videos)} video(s) probed" + (f"; {problems[0]}" if problems else ""),
     )
 
 
 def step_resume() -> None:
-    script = os.path.join(PACKAGE, "render", "render_sequences.py")
+    script = os.path.join(PROJECT, "render_sequences.py")
     code, out, _err = run_blender(
         script,
-        ["--input-root", GENERATED, "--output-root", RENDERED,
+        ["--input-root", os.path.join(PROJECT, "sequence"),
+         "--output-root", os.path.join(PROJECT, "video"),
          "--log-level", "INFO"],
         timeout=900,
     )
     # A fully rendered tree must be a success, and the renderer must say so.
     record(
-        "8. re-running the renderer skips finished sequences",
+        "9. re-running the renderer skips finished sequences",
         code == 0 and "already have a video" in out,
         next(
             (line.strip() for line in out.splitlines() if "already have a video" in line),
@@ -365,15 +440,16 @@ def step_resume() -> None:
 
 
 def step_list() -> None:
-    script = os.path.join(PACKAGE, "render", "render_sequences.py")
+    script = os.path.join(PROJECT, "render_sequences.py")
     code, out, _err = run_blender(
         script,
-        ["--input-root", GENERATED, "--output-root", RENDERED, "--list",
+        ["--input-root", os.path.join(PROJECT, "sequence"),
+         "--output-root", os.path.join(PROJECT, "video"), "--list",
          "--log-level", "ERROR"],
         timeout=600,
     )
     record(
-        "9. --list enumerates sequences and their state",
+        "10. --list enumerates sequences and their state",
         code == 0 and "sequence(s):" in out and "rendered" in out,
         next((line.strip() for line in out.splitlines() if "sequence(s)" in line), ""),
     )
@@ -398,7 +474,9 @@ def main() -> int:
         if isinstance(config_path, str) and os.path.isfile(config_path):
             root = step_generate(config_path)
             if isinstance(root, str) and os.path.isdir(root):
-                step_check_artifacts(root)
+                print(f"  project : {root}")
+                step_check_project(root)
+                step_check_artifacts(os.path.join(root, "sequence"))
                 rendered = step_render()
                 if isinstance(rendered, str) and os.path.isdir(rendered):
                     step_render_artifacts(rendered)
@@ -406,13 +484,13 @@ def main() -> int:
                     step_resume()
                     step_list()
                 else:
-                    record("6-9. render stages", False, str(rendered))
+                    record("6-10. render stages", False, str(rendered))
             else:
-                record("4-9. generation stages", False, str(root))
+                record("4-10. generation stages", False, str(root))
         else:
-            record("3-9. generation stages", False, str(config_path))
+            record("3-10. generation stages", False, str(config_path))
     else:
-        record("2-9. pipeline stages", False, failure)
+        record("2-10. pipeline stages", False, failure)
 
     print("\n" + "=" * 74)
     passed = sum(1 for _n, ok, _d in STEPS if ok)

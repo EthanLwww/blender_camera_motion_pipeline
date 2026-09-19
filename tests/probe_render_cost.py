@@ -16,6 +16,8 @@ _PACKAGE_PARENT = os.path.dirname(os.path.dirname(_HERE))
 for path in (_PACKAGE_PARENT, _HERE):
     if path not in sys.path:
         sys.path.insert(0, path)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _boot  # noqa: E402,F401  (the add-on folder may be called anything)
 
 import bpy  # noqa: E402
 

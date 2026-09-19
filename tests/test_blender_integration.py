@@ -25,14 +25,17 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_PACKAGE_PARENT = os.path.dirname(os.path.dirname(_HERE))
-for path in (_PACKAGE_PARENT,):
+_PACKAGE_ROOT = os.path.dirname(_HERE)
+_PACKAGE_PARENT = os.path.dirname(_PACKAGE_ROOT)
+for path in (_PACKAGE_PARENT, _HERE):
     if path not in sys.path:
         sys.path.insert(0, path)
+import _boot  # noqa: E402,F401  (the add-on folder may be called anything)
 
 from blender_motion_pipeline.config.defaults import default_config  # noqa: E402
 from blender_motion_pipeline.config.models import (  # noqa: E402
@@ -50,6 +53,7 @@ from blender_motion_pipeline.core.scene_loader import (  # noqa: E402
     scan_directory,
 )
 from blender_motion_pipeline.io.json_io import load_json_file, save_json_file  # noqa: E402
+from blender_motion_pipeline.io.path_utils import to_forward_slashes  # noqa: E402
 from blender_motion_pipeline.tests.harness import Suite, close, equal, ok, raises, vec_close  # noqa: E402
 
 WORK = os.path.join(tempfile.gettempdir(), "motion_pipeline_itest")
@@ -203,14 +207,12 @@ def write_templates() -> str:
 
 def make_config(output_root: str, *, templates: str = "", names=None,
                 validation: bool = True, search: bool = True,
-                mode: str = CHARACTER_MODE_NONE, sample_step: int = 1,
-                save_blend: bool = True):
+                mode: str = CHARACTER_MODE_NONE, sample_step: int = 1):
     config = default_config()
     config.batch.output_root = output_root
     config.batch.mode = mode
     config.batch.overwrite = True
     config.batch.resume = False
-    config.batch.save_sequence_blend = bool(save_blend)
     config.motion.template_path = templates or write_templates()
     config.motion.template_names = list(names or [t["id"] for t in TEMPLATES])
     config.motion.frame_start = 0
@@ -432,16 +434,24 @@ def build_suite() -> Suite:
 
         curves = action_data_paths(camera.animation_data.action)
         ok(any("location" in path for path in curves), curves)
-        # ... and the saved sequence carries its own, independent action.
-        sequence_blend = os.path.join(
-            OUT_DIR, "animated", "animated_cam", "still", "sequence_000001", "sequence_000001.blend"
-        )
-        ok(os.path.isfile(sequence_blend), sequence_blend)
-        load_blend_file(sequence_blend)
+        # ... and the sequence records its own, independent animation.
+        sequence_dir = os.path.join(OUT_DIR, "animated", "animated_cam", "still",
+                                    "sequence_000001")
+        payload = load_json_file(os.path.join(sequence_dir, "sequence_000001.json"))
+        from blender_motion_pipeline.core.camera_animation import PAYLOAD_KEY, apply_payload
+
+        block = payload.get(PAYLOAD_KEY) or {}
+        ok(block.get("samples"), "the sequence must record the camera animation it generated")
+        ok(block.get("key_count", 0) >= 2, block.get("key_count"))
+        # Replaying it onto a fresh copy of the scene must key the same three
+        # channels the generator keyed, on the camera's own data block.
+        load_blend_file(state["animated"])
+        summary = apply_payload(block, config=load_json_file(
+            os.path.join(sequence_dir, "sequence_config.json")))
+        ok(summary["applied"], summary)
         seq_camera = bctx.list_camera_objects()[0]
         ok(seq_camera.animation_data is not None and seq_camera.animation_data.action is not None,
-           "the sequence blend must contain the generated animation")
-        ok(seq_camera.data.users == 1, "the sequence camera must own an independent data block")
+           "replaying the sequence must produce a camera animation")
 
     @suite.case("a camera parented to a moving rig reproduces the validated world path")
     def _():
@@ -461,14 +471,20 @@ def build_suite() -> Suite:
         equal(outcome.generated, 1)
         sequence_dir = os.path.join(OUT_DIR, "parented", "parented_cam", "still",
                                     "sequence_000001")
-        sequence_blend = os.path.join(sequence_dir, "sequence_000001.blend")
-        ok(os.path.isfile(sequence_blend), sequence_blend)
 
         payload = load_json_file(os.path.join(sequence_dir, "sequence_000001.json"))
         recorded = {row["frame"]: row for row in payload["camera_trajectory"]}
         ok(len(recorded) >= 2, len(recorded))
 
-        load_blend_file(sequence_blend)
+        # Replay the recorded animation onto the scene it was generated from: the
+        # evaluated, parented camera must land on the recorded world path.
+        from blender_motion_pipeline.core.camera_animation import PAYLOAD_KEY, apply_payload
+
+        block = payload.get(PAYLOAD_KEY) or {}
+        load_blend_file(state["parented"])
+        summary = apply_payload(block, config=load_json_file(
+            os.path.join(sequence_dir, "sequence_config.json")))
+        ok(summary["applied"], summary)
         scene = bpy.context.scene
         camera = scene.camera
         ok(camera.parent is not None, "the fixture camera must stay parented")
@@ -582,30 +598,66 @@ def build_suite() -> Suite:
         ok(math.dist(anchors[0], anchors[1]) < 1e-6,
            f"the two sequences anchored differently: {anchors}")
 
-    @suite.case("saving a sequence blend survives a dangling asset with autopack on")
+    @suite.case("pack_textures reports dangling assets instead of failing")
     def _():
-        # Regression: with ``bpy.data.use_autopack`` enabled, ``save_as_mainfile``
-        # re-packs every external file and aborts on the first missing one
-        # ("cannot pack file, source path not found").  A generated sequence must
-        # still save, and the artist's setting must be left exactly as it was.
-        import bpy
-
+        # The packer is what makes a shipped project folder independent of the
+        # texture paths on the machine that generated it, so it must survive the
+        # case that matters most: a scene whose assets are already gone.
         from blender_motion_pipeline.core.scene_loader import load_blend_file
-        from blender_motion_pipeline.core.sequence_generator import write_sequence_blend
+        from blender_motion_pipeline.render import pack_textures
 
         load_blend_file(state["missing_asset"])
-        bpy.data.use_autopack = True
-        target = os.path.join(WORK, "autopack_on.blend")
-        write_sequence_blend(target)
-        ok(os.path.isfile(target), target)
-        equal(bool(bpy.data.use_autopack), True, "the artist's autopack setting must be restored")
+        present, missing = pack_textures.classify_external(pack_textures.external_files())
+        ok(missing, "the fixture must reference at least one file that does not exist")
+        ok(all(entry.get("kind") for entry in present + missing),
+           "every reference must be classified as an image/library/...")
+        ok(all(os.path.isabs(entry["path"]) for entry in present + missing),
+           "references must be resolved to absolute paths")
 
-        # ... and a disabled setting must stay disabled.
-        bpy.data.use_autopack = False
-        second = os.path.join(WORK, "autopack_off.blend")
-        write_sequence_blend(second)
-        ok(os.path.isfile(second), second)
-        equal(bool(bpy.data.use_autopack), False)
+        target = os.path.join(WORK, "pack_dangling.blend")
+        shutil.copy2(state["missing_asset"], target)
+        before = os.path.getsize(target)
+        record = pack_textures.pack_scene(target, dry_run=True)
+        ok(record["ok"], record)
+        equal([entry["name"] for entry in record["missing"]],
+              [entry["name"] for entry in missing],
+              "a dry run must report exactly the dangling references")
+        equal(os.path.getsize(target), before, "a dry run must not modify the file")
+
+    @suite.case("pack_textures packs a real external texture into the copy")
+    def _():
+        import bpy
+
+        from blender_motion_pipeline.render import pack_textures
+
+        # A scene that really depends on a file on disk: an image in a material.
+        bpy.ops.wm.read_factory_settings(use_empty=True)
+        bpy.ops.mesh.primitive_plane_add(size=2.0)
+        plane = bpy.context.active_object
+        texture_path = os.path.join(WORK, "pack_me.png")
+        image = bpy.data.images.new("pack_me", 4, 4)
+        image.filepath_raw = texture_path
+        image.file_format = "PNG"
+        image.save()
+        material = bpy.data.materials.new("pack_me")
+        material.use_nodes = True
+        node = material.node_tree.nodes.new("ShaderNodeTexImage")
+        node.image = image
+        plane.data.materials.append(material)
+        scene_path = os.path.join(WORK, "pack_source.blend")
+        bpy.ops.wm.save_as_mainfile(filepath=scene_path, check_existing=False, compress=False)
+
+        record = pack_textures.pack_scene(scene_path)
+        ok(record["ok"], record["error"] or record["note"])
+        equal(record["missing"], [], "the texture exists, so nothing may be reported missing")
+        equal(len(record["packed"]), 1, record["packed"])
+        ok(record["size_after"] > 0, record)
+        # The file must now carry the texture: deleting the source proves nothing
+        # is read from disk any more.
+        os.remove(texture_path)
+        bpy.ops.wm.open_mainfile(filepath=scene_path, load_ui=False)
+        packed = [img for img in bpy.data.images if img.packed_file is not None]
+        ok(packed, "the texture must live inside the .blend after packing")
 
     # -- templates -------------------------------------------------------
     @suite.case("missing and malformed template JSON are reported clearly")
@@ -659,13 +711,87 @@ def build_suite() -> Suite:
         base = os.path.join(OUT_DIR, "basic", "single")
         for motion in ("still", "push_in"):
             directory = os.path.join(base, motion, "sequence_000001")
-            for name in ("sequence_000001.blend", "sequence_config.json", "sequence_000001.json",
+            for name in ("sequence_config.json", "sequence_000001.json",
                          "sequence_000001_camera.txt", "validation_report.json", "generation_log.txt"):
                 ok(os.path.isfile(os.path.join(directory, name)), os.path.join(directory, name))
+            # Animation-only: the sequence carries no scene copy of its own.
+            ok(not [n for n in os.listdir(directory) if n.endswith(".blend")],
+               "a sequence folder must not contain a .blend copy")
+            payload = load_json_file(os.path.join(directory, "sequence_config.json"))
+            equal(payload["sequence"]["source_blend"], to_forward_slashes(state["single"]))
+            equal(payload["camera_animation"]["available"], True)
             manifest = os.path.join(base, motion, "manifest.json")
             ok(os.path.isfile(manifest), manifest)
         ok(os.path.isfile(os.path.join(OUT_DIR, "basic", "manifest.json")), "root manifest")
         ok(os.path.isfile(os.path.join(OUT_DIR, "basic", "batch_report.json")), "batch report")
+
+    @suite.case("a run writes one self-contained project folder")
+    def _():
+        # What gets zipped to a render node: the sequence tree, the scenes the
+        # sequences must be replayed onto, the renderer and the package it imports.
+        # Generation must run from the *copy* so what ships is what was validated.
+        import bpy
+
+        from blender_motion_pipeline.core.batch_runner import BatchRunner
+        from blender_motion_pipeline.core.project import ProjectLayout, project_folder_name
+
+        project_root = os.path.join(OUT_DIR, "project")
+        layout = ProjectLayout.create(project_root, package_root=_PACKAGE_ROOT)
+        equal(os.path.basename(layout.root), project_folder_name())
+        equal(os.path.dirname(layout.root), os.path.normpath(project_root))
+        equal(layout.sequence_root, os.path.join(layout.root, "sequence"))
+
+        config = make_config(project_root, names=["still"])
+        entry = SceneEntry(path=state["single"])
+        report = BatchRunner(config, output_root=project_root, scene_entries=[entry],
+                             project_layout=layout).run()
+        ok(report.ok, report.summary_text())
+        equal(report.generated, 1)
+        equal(report.project_root, layout.root)
+
+        for directory in ("sequence", "scene", "video"):
+            ok(os.path.isdir(os.path.join(layout.root, directory)), directory)
+        for name in ("render_sequences.py", "pack_textures.py", "project.json",
+                     "RENDER_README.md", "render_project.bat", "render_project.sh"):
+            ok(os.path.isfile(os.path.join(layout.root, name)), name)
+        ok(os.path.isfile(os.path.join(layout.root, os.path.basename(_PACKAGE_ROOT),
+                                       "_bootstrap.py")),
+           "the package the renderer imports must be inside the project folder")
+
+        copies = os.listdir(layout.scene_root)
+        equal(len(copies), 1, copies)
+        copy = os.path.join(layout.scene_root, copies[0])
+        equal(copy, entry.path, "generation must run from the project's own scene copy")
+        equal(entry.original_path, state["single"], "the original must stay recorded")
+
+        sequence = os.path.join(layout.sequence_root, "single", "still", "sequence_000001")
+        payload = load_json_file(os.path.join(sequence, "sequence_config.json"))
+        equal(payload["sequence"]["source_blend"], to_forward_slashes(copy))
+        equal(payload["sequence"]["source_scene_rel"], "scene/" + copies[0])
+        equal(payload["sequence"]["source_blend_original"], to_forward_slashes(state["single"]))
+
+        manifest = load_json_file(os.path.join(layout.root, "project.json"))
+        equal(manifest["sequence_root"], to_forward_slashes(layout.sequence_root))
+        ok("--input-root" in manifest["render_command"], manifest["render_command"])
+        equal(manifest["scenes"][0]["relative"], "scene/" + copies[0])
+        with open(os.path.join(layout.root, "RENDER_README.md"), encoding="utf-8") as handle:
+            readme = handle.read()
+        ok("--input-root" in readme and "--output-root" in readme, readme[:400])
+        ok("scene/" + copies[0] in readme, "the README must list the scenes it ships")
+
+        # The point of all of it: the folder renders with its own copy of the
+        # renderer, importing the package beside it, with nothing installed.
+        blender = bpy.app.binary_path or "blender"
+        completed = subprocess.run(
+            [blender, "-b", "--factory-startup",
+             "-P", os.path.join(layout.root, "render_sequences.py"), "--",
+             "--input-root", layout.sequence_root, "--output-root", layout.video_root,
+             "--list", "--log-level", "ERROR"],
+            capture_output=True, text=True, timeout=600,
+        )
+        output = (completed.stdout or "") + (completed.stderr or "")
+        ok(completed.returncode == 0, output[-1200:])
+        ok("sequence(s):" in output, output[-800:])
 
     @suite.case("the generated sequence JSON carries the documented fields")
     def _():
@@ -1015,7 +1141,10 @@ def build_suite() -> Suite:
         ok("single" in names, names)
         sequences = manager.find_sequences()
         ok(all(info.sequence_id for info in sequences), "every sequence must have an id")
-        ok(all(info.has_blend for info in sequences), "every sequence must have a blend file")
+        ok(all(info.storage_mode == "animation" for info in sequences),
+           "sequences store the camera animation, never a scene copy")
+        ok(all(info.has_animation_payload for info in sequences),
+           "every sequence must record the animation it needs to render")
 
     # -- rendering -------------------------------------------------------
     @suite.case("the render script renders MP4 + JSON + TXT per sequence")
@@ -1084,16 +1213,15 @@ def build_suite() -> Suite:
                     worst = max(worst, abs(left["matrix"][row][column] - right["matrix"][row][column]))
         ok(worst < 1e-4, f"the rendered camera must match the generated one (worst delta {worst:g})")
 
-    @suite.case("an animation-only sequence renders the same path as a blend-based one")
+    @suite.case("a sequence stores the camera animation, never a scene copy")
     def _():
         # Storing the animation instead of a scene copy is the difference between
-        # ~150 KB and hundreds of MB per sequence, so both shapes must render
-        # identically -- otherwise switching would silently change every video.
+        # ~150 KB and hundreds of MB per sequence, so the sequence folder must hold
+        # the payload and no .blend at all.
         from blender_motion_pipeline.render import render_sequences as rs
 
         animation_root = os.path.join(OUT_DIR, "animation_only")
-        report, outcome = generate_for(state["single"], animation_root,
-                                      names=["push_in"], save_blend=False)
+        report, outcome = generate_for(state["single"], animation_root, names=["push_in"])
         ok(report.ok, report.summary_text())
         equal(outcome.generated, 1)
 
@@ -1294,6 +1422,61 @@ def build_suite() -> Suite:
         finally:
             registration.unregister_all()
 
+    @suite.case("the render engine is picked from a list in the Sequence output panel")
+    def _():
+        # The engine used to be a text field: a typo produced a sequence that no
+        # render node could reproduce.  It is an enum now, in the Sequence output
+        # panel where the rest of the render defaults live, and every identifier it
+        # offers is one this Blender accepts.
+        import bpy
+        import pathlib
+
+        from blender_motion_pipeline import panels, registration
+        from blender_motion_pipeline.properties import RENDER_ENGINES
+
+        registration.register_all()
+        try:
+            group = bpy.context.scene.mpp
+            group_props = bpy.types.Scene.bl_rna.properties["mpp"].fixed_type.properties
+            engine_prop = group_props["render_engine"]
+            equal(engine_prop.type, "ENUM", "the engine must be a dropdown, not a text field")
+            identifiers = [item.identifier for item in engine_prop.enum_items]
+            equal(identifiers, [identifier for identifier, _label, _tip in RENDER_ENGINES])
+            equal(group.render_engine, "BLENDER_EEVEE", "EEVEE is the default")
+
+            scene = bpy.context.scene
+            before = scene.render.engine
+            for identifier in identifiers:
+                scene.render.engine = identifier
+                equal(scene.render.engine, identifier,
+                      f"{identifier} must be usable by this Blender build")
+            scene.render.engine = before
+
+            equal(group.to_config().render.engine, "BLENDER_EEVEE")
+            group.render_engine = "CYCLES"
+            equal(group.to_config().render.engine, "CYCLES")
+            # A config file naming an engine this build does not offer must not
+            # leave the dropdown in an impossible state.
+            config = group.to_config()
+            config.render.engine = "SOME_FUTURE_ENGINE"
+            group.from_config(config)
+            ok(group.render_engine in identifiers, group.render_engine)
+
+            # The Local render panel's own engine choice is a dropdown as well.
+            render_prop = group_props["render_engine_choice"]
+            equal(render_prop.type, "ENUM")
+            equal([item.identifier for item in render_prop.enum_items], identifiers)
+
+            # ... and the recording dropdown is drawn by the Sequence output panel.
+            source = pathlib.Path(panels.__file__).read_text(encoding="utf-8")
+            body = source.split("class MPP_PT_output")[1].split("class MPP_PT_actions")[0]
+            ok('prop(group, "render_engine")' in body,
+               "the engine dropdown must be in the Sequence output panel")
+            ok('prop(group, "sequence_resolution")' in body,
+               "so must the resolution preset")
+        finally:
+            registration.unregister_all()
+
     @suite.case("a sequence can fix its own output resolution for the renderer")
     def _():
         # The recorded size used to be informational only: the renderer kept the
@@ -1372,6 +1555,61 @@ def build_suite() -> Suite:
         ok(result3["ok"], result3.get("error"))
         equal(result3["render"]["resolution_source"], "scene")
         equal(result3["render"]["resolution"], [160, 90])
+
+    @suite.case("every panel draws without touching a name that is not there")
+    def _():
+        # The suite calls operators, never ``draw()`` -- so a panel that reads a
+        # property or a helper that no longer exists (exactly what a rename or a
+        # removed option leaves behind) would only show up when a user opens the
+        # sidebar.  A recording stub layout drives every panel's draw code here.
+        import bpy
+
+        from blender_motion_pipeline import panels, registration
+
+        class StubLayout:
+            """Accepts every UILayout call and records it."""
+
+            def __init__(self, path: str = "root"):
+                object.__setattr__(self, "path", path)
+                object.__setattr__(self, "calls", [])
+
+            def __getattr__(self, name):
+                if name.startswith("__"):
+                    raise AttributeError(name)
+
+                def _call(*args, **kwargs):
+                    self.calls.append((name, args, kwargs))
+                    for value in args:
+                        if isinstance(value, str) and name in ("prop", "operator"):
+                            # A property/operator name that does not exist would
+                            # raise inside Blender's own draw, so check it here.
+                            assert value
+                    return self
+
+                return _call
+
+        drawn = []
+        registration.register_all()
+        try:
+            context = bpy.context
+            for name in sorted(dir(panels)):
+                panel = getattr(panels, name)
+                draw = getattr(panel, "draw", None)
+                if not name.startswith("MPP_") or draw is None:
+                    continue
+                stub = StubLayout(name)
+                holder = type("Panel", (), {"layout": stub})()
+                draw(holder, context)
+                drawn.append(name)
+                ok(stub.calls, f"{name} must draw something")
+            expected = [
+                name for name in dir(panels)
+                if name.startswith("MPP_PT_") and hasattr(getattr(panels, name), "draw")
+            ]
+            equal(sorted(drawn), sorted(expected), "every panel must have been drawn")
+            ok(len(drawn) >= 8, f"expected every panel to be drawn, saw {drawn}")
+        finally:
+            registration.unregister_all()
 
     @suite.case("dry-run resolves outputs without rendering")
     def _():
@@ -1633,7 +1871,8 @@ def build_suite() -> Suite:
             ok(group.last_report, "the panel must show a report")
             ok("output" in group.last_report.lower(), group.last_report[:300])
 
-            # With an output folder and a queue, the check must pass.
+            # With an output folder and a queue, the check must pass and name the
+            # project folder it would create inside the folder above.
             group.output_root = os.path.join(OUT_DIR, "ui")
             group.template_path = write_templates()
             group.motion_names = "still"
@@ -1644,6 +1883,8 @@ def build_suite() -> Suite:
             report = group.last_report
             ok(report.upper().startswith("OK"), report[:300])
             ok("scenes: 1" in report, report[:300])
+            ok("project folder:" in report, report[:400])
+            ok(os.path.basename(group.project_folder()) in report, report[:400])
             ok(group.motion_count == 1, group.motion_count)
         finally:
             registration.unregister_all()
@@ -1664,9 +1905,6 @@ def build_suite() -> Suite:
             group.overwrite = True
             group.resume = False
             group.validation_sample_step = 1
-            # Sequence .blend writes are unsafe from a timer callback; the panel
-            # defers them, so disable them here to keep the assertion focused.
-            group.save_sequence_blend = False
             group.file_path = state["single"]
             bpy.ops.mpp.add_files()
             equal(len(group.scene_list), 1)
@@ -1688,12 +1926,32 @@ def build_suite() -> Suite:
             status = live_status()
             equal(status.get("state"), "done", status)
             group = bpy.context.scene.mpp
-            ok(os.path.isdir(os.path.join(OUT_DIR, "ui", "single", "still")),
-               "the output tree must exist")
-            ok(status.get("generated", 0) >= 1, status)
-            ok(os.path.isfile(os.path.join(OUT_DIR, "ui", "single", "still",
+            # The panel writes a project folder, not a bare sequence tree.
+            project = status.get("project_folder") or group.last_project_folder
+            ok(bool(project) and os.path.isdir(project), f"project folder: {project!r}")
+            ok(os.path.isdir(os.path.join(project, "sequence", "single", "still")),
+               "the sequence tree must be inside the project folder")
+            ok(os.path.isdir(os.path.join(project, "scene")),
+               "the project folder must hold the scene copy the renderer replays onto")
+            ok(os.path.isfile(os.path.join(project, "project.json")),
+               "the project folder must describe itself")
+            ok(os.path.isfile(os.path.join(project, "render_sequences.py")),
+               "the project folder must ship the headless renderer")
+            scene_copies = os.listdir(os.path.join(project, "scene"))
+            equal(len(scene_copies), 1, scene_copies)
+            ok(os.path.isfile(os.path.join(project, "sequence", "single", "still",
                                            "sequence_000001", "sequence_config.json")),
                "the sequence config must be written")
+            recorded = load_json_file(os.path.join(project, "sequence", "single", "still",
+                                                   "sequence_000001", "sequence_config.json"))
+            recorded_scene = recorded["sequence"]["source_blend"]
+            ok(os.path.normcase(recorded_scene) ==
+               os.path.normcase(os.path.join(project, "scene", scene_copies[0])),
+               f"a sequence must be generated from the shipped scene copy, not the original: {recorded_scene}")
+            equal(recorded["sequence"].get("source_scene_rel"),
+                  "scene/" + scene_copies[0])
+            equal(recorded["sequence"].get("source_blend_original"),
+                  to_forward_slashes(state["single"]))
         finally:
             registration.unregister_all()
 
@@ -1725,7 +1983,6 @@ def build_suite() -> Suite:
             group.overwrite = True
             group.resume = False
             group.validation_enabled = False
-            group.save_sequence_blend = False
             group.file_path = state["single"]
             bpy.ops.mpp.add_files()
 
@@ -1751,7 +2008,9 @@ def build_suite() -> Suite:
             snapshot = ui_task.snapshot()
             equal(snapshot["state"], "done", snapshot)
             ok(snapshot["generated"] >= 1, snapshot)
-            ok(os.path.isfile(os.path.join(OUT_DIR, "timer_survival", "single", "still",
+            project = snapshot.get("project_folder") or ""
+            ok(bool(project) and os.path.isdir(project), f"project folder: {project!r}")
+            ok(os.path.isfile(os.path.join(project, "sequence", "single", "still",
                                            "sequence_000001", "sequence_config.json")),
                "the run must actually produce a sequence")
 

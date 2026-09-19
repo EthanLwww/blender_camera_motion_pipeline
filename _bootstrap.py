@@ -39,14 +39,81 @@ MAX_DEPTH = 4
 
 
 def package_root(start: str) -> str:
-    """Absolute path of the package folder that contains ``start`` (or "")."""
+    """Absolute path of the add-on package folder containing ``start`` (or "").
+
+    A folder qualifies when it holds **both** ``__init__.py`` and ``_bootstrap.py``,
+    and the *nearest* one wins.  A bare ``__init__.py`` is not enough, in either
+    direction:
+
+    * ``render/`` and ``core/`` are subpackages, so the nearest ``__init__.py`` may
+      be one level too deep;
+    * this machine's ``.../scripts/addons/`` has an ``__init__.py`` too, so the
+      *outermost* one is one level too high.
+
+    Getting it wrong registered the historical name against a folder with no
+    submodules, and the scripts died with
+    ``No module named 'blender_motion_pipeline.config'``.
+    """
     current = os.path.dirname(os.path.abspath(start))
     for _ in range(MAX_DEPTH):
-        if os.path.isfile(os.path.join(current, "__init__.py")):
+        if os.path.isfile(os.path.join(current, "__init__.py")) and os.path.isfile(
+            os.path.join(current, "_bootstrap.py")
+        ):
             return current
         parent = os.path.dirname(current)
         if parent == current:
-            return ""
+            break
+        current = parent
+    return ""
+
+
+def child_package_root(directory: str) -> str:
+    """A package folder *inside* ``directory`` (or "").
+
+    Generated project folders ship the package as a subfolder next to the render
+    script, so ``<project>/blender_camera_motion_pipeline`` is the package root
+    for a script placed at ``<project>/render_sequences.py``.
+    """
+    base = os.path.abspath(directory)
+    if not os.path.isdir(base):
+        return ""
+    try:
+        names = sorted(os.listdir(base))
+    except OSError:
+        return ""
+    for name in names:
+        if name.startswith(".") or name == "__pycache__":
+            continue
+        candidate = os.path.join(base, name)
+        if os.path.isfile(os.path.join(candidate, "__init__.py")) and os.path.isfile(
+            os.path.join(candidate, "_bootstrap.py")
+        ):
+            return candidate
+    return ""
+
+
+def locate(start: str) -> str:
+    """Path of the ``_bootstrap.py`` that serves a script at ``start`` (or "").
+
+    Covers every shape this project ships in: inside the package
+    (``<pkg>/tests/x.py``), in a subfolder of it (``<pkg>/render/x.py``), next to
+    the package (``<farm>/x.py`` beside ``<farm>/<pkg>/``) and inside a generated
+    project folder (``<project>/x.py`` beside ``<project>/<pkg>/``).
+    """
+    here = os.path.abspath(start)
+    if not os.path.isdir(here):
+        here = os.path.dirname(here)
+    current = here
+    for _ in range(MAX_DEPTH):
+        beside = os.path.join(current, "_bootstrap.py")
+        if os.path.isfile(beside):
+            return beside
+        nested = child_package_root(current)
+        if nested:
+            return os.path.join(nested, "_bootstrap.py")
+        parent = os.path.dirname(current)
+        if parent == current:
+            break
         current = parent
     return ""
 
@@ -69,6 +136,11 @@ def bootstrap(start: str, *, alias: str = LEGACY_NAME) -> str:
     (which leaves the caller's imports to fail with Python's own error).
     """
     root = package_root(start)
+    if not root:
+        # A generated project folder puts the script at the project root and the
+        # package in a subfolder of it.
+        base = os.path.abspath(start)
+        root = child_package_root(base if os.path.isdir(base) else os.path.dirname(base))
     if not root:
         return ""
     parent = os.path.dirname(root)

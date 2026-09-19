@@ -419,15 +419,15 @@ class MPP_SceneProperties(PropertyGroup):
 
     # -- output ----------------------------------------------------------
     output_root: StringProperty(
-        name="Output folder",
-        description="Where the scene/motion/sequence tree is written",
+        name="Project folder",
+        description=(
+            "Folder the project is written into. Generation creates "
+            "blender_camera_<date>/ inside it, holding sequence/ (the sequence tree), "
+            "scene/ (a copy of every source .blend) and video/ (render output), plus "
+            "the headless render toolkit"
+        ),
         default="",
         subtype="DIR_PATH",
-    )
-    save_sequence_blend: BoolProperty(
-        name="Save sequence .blend",
-        description="Write an independent, renderable .blend per sequence",
-        default=True,
     )
     overwrite: BoolProperty(
         name="Overwrite existing",
@@ -466,9 +466,13 @@ class MPP_SceneProperties(PropertyGroup):
     sequence_res_x: IntProperty(name="Width", default=1280, min=16, max=16384)
     sequence_res_y: IntProperty(name="Height", default=720, min=16, max=16384)
     sequence_res_percentage: IntProperty(name="Resolution %", default=100, min=1, max=100)
-    render_engine: StringProperty(
+    render_engine: EnumProperty(
         name="Engine",
-        description="Engine recorded in sequence_config.json for the renderer",
+        description=(
+            "Render engine recorded in sequence_config.json, so a headless render "
+            "reproduces it. Pick from the list; the identifier is written to the file"
+        ),
+        items=RENDER_ENGINES,
         default="BLENDER_EEVEE",
     )
     render_samples: IntProperty(name="Samples", default=32, min=1, max=100000)
@@ -613,6 +617,11 @@ class MPP_SceneProperties(PropertyGroup):
     progress_fraction: FloatProperty(name="Progress", default=0.0, min=0.0, max=1.0)
     last_report: StringProperty(name="Last report", default="")
     last_output_root: StringProperty(name="Last output", default="")
+    last_project_folder: StringProperty(
+        name="Last project folder",
+        description="The dated project folder the last run wrote into",
+        default="",
+    )
     generated_count: IntProperty(name="Generated", default=0, min=0)
     failed_count: IntProperty(name="Failed", default=0, min=0)
     skipped_count: IntProperty(name="Skipped", default=0, min=0)
@@ -630,7 +639,6 @@ class MPP_SceneProperties(PropertyGroup):
         config.batch.mode = self.character_mode
         config.batch.overwrite = bool(self.overwrite)
         config.batch.resume = bool(self.resume)
-        config.batch.save_sequence_blend = bool(self.save_sequence_blend)
         config.batch.save_validation_report = bool(self.save_validation_report)
         config.batch.verbose = bool(self.verbose_logging)
         config.batch.character_asset_root = (
@@ -716,13 +724,34 @@ class MPP_SceneProperties(PropertyGroup):
             return f"Sequences record {width} x {height} at {percentage}% ({int(round(width * percentage / 100))} x {int(round(height * percentage / 100))})."
         return f"Sequences record {width} x {height}."
 
+    # -- project folder ---------------------------------------------------
+    def project_folder(self) -> str:
+        """The dated project folder this configuration writes into ("" when unset)."""
+        from .core.project import project_folder_name
+
+        if not self.output_root:
+            return ""
+        return os.path.join(normalize_path(self.output_root), project_folder_name())
+
+    def project_summary(self) -> str:
+        """Multi-line preview of what generation is about to create."""
+        if not self.output_root:
+            return "No project folder is set yet: pick the folder the project is written into."
+        root = self.project_folder()
+        return "\n".join([
+            f"Project folder: {to_forward_slashes(root)}",
+            "  sequence/  the sequence tree the renderer reads",
+            "  scene/     a copy of every source .blend (what the sequences replay onto)",
+            "  video/     render output",
+            "  render_sequences.py + the package: render this folder on any machine",
+        ])
+
     def from_config(self, config: BatchConfig) -> None:
         """Push a :class:`BatchConfig` into the panel fields."""
         self.output_root = config.batch.output_root
         self.character_mode = config.batch.mode
         self.overwrite = bool(config.batch.overwrite)
         self.resume = bool(config.batch.resume)
-        self.save_sequence_blend = bool(config.batch.save_sequence_blend)
         self.save_validation_report = bool(config.batch.save_validation_report)
         self.verbose_logging = bool(config.batch.verbose)
         self.character_asset_root = config.batch.character_asset_root
@@ -761,7 +790,10 @@ class MPP_SceneProperties(PropertyGroup):
         self.search_focal_steps = float(config.search.focal_adjust_steps)
         self.search_max_output = int(config.search.max_output_candidates)
 
-        self.render_engine = config.render.engine
+        # The dropdown only knows the three engines it lists; a config file naming
+        # anything else keeps the current choice instead of erroring on an enum.
+        if config.render.engine in {identifier for identifier, _label, _tip in RENDER_ENGINES}:
+            self.render_engine = config.render.engine
         self.render_samples = int(config.render.samples)
         self.render_fps = float(config.render.fps)
         self.video_format = config.render.video_format

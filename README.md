@@ -4,6 +4,9 @@ Batch-load `.blend` scenes, generate camera-motion sequences from JSON templates
 (with validation and automatic camera repositioning), and render them to video on
 a workstation or a headless render node.
 
+> **Chinese (condensed) version**: [`README.zh-CN.md`](README.zh-CN.md) — same
+> content, condensed; panel names, field names, flags and file names stay English.
+
 Verified against **Blender 5.2.2 LTS** (Python 3.13) on Windows, with an
 end-to-end pass over 3 scenes × 4 templates — 20 sequences — 20 MP4/JSON/TXT
 triples. The code also handles Blender 4.x and 3.6 API shapes for the features it
@@ -198,13 +201,36 @@ what survives.
 
 ### Sequence output
 
-* **Output folder**, **Save sequence .blend**, **Save validation report**,
-  **Overwrite existing**, **Reuse existing sequences**, **Cameras**
-  (`all`, names, or indices), and the render defaults recorded for the renderer.
-* **Render defaults (recorded for the renderer)** — engine, samples, fps, video
-  format, trajectory sampling and the **Sequence resolution**. All of them are
-  written into every sequence's `sequence_config.json`, so a later headless render
-  reproduces them.
+* **Project folder** — the folder a run writes into. Generation creates
+  `blender_camera_<YYYYMMDD>/` inside it (re-running on the same day reuses it, which
+  is what makes *Reuse existing sequences* work) holding:
+
+  | Folder / file | What it is |
+  |---|---|
+  | `sequence/` | the sequence tree — what the renderer reads (`--input-root`) |
+  | `scene/` | a copy of every source `.blend` the sequences are replayed onto |
+  | `video/` | render output (`--output-root`) |
+  | `render_sequences.py` | the headless renderer |
+  | `pack_textures.py` | optional: pack the scene copies so the folder needs no asset paths |
+  | `blender_camera_motion_pipeline/` | the package the renderer imports (nothing to install) |
+  | `project.json`, `RENDER_README.md` | what the folder is, and the exact render command |
+  | `render_project.bat` / `.sh` | one-click launchers (`BLENDER=/path/to/blender` when it is not on `PATH`) |
+
+  That folder is the unit you zip to a render node. The panel shows the exact path it
+  will create under the folder field, and *Open project folder* opens it.
+* Generation runs **from the copy in `scene/`**, so what ships is what was validated.
+  Each `sequence_config.json` records `source_blend` (absolute, the copy),
+  `source_scene_rel` (`scene/<name>.blend`, relative to the project folder) and
+  `source_blend_original` (where the scene came from). The renderer prefers the
+  absolute path, falls back to the relative one when the folder has moved, and
+  finally to `--path-map`.
+* **Save validation report**, **Overwrite existing**, **Reuse existing sequences**,
+  **Cameras** (`all`, names, or indices), and the render defaults recorded for the
+  renderer.
+* **Render defaults (recorded for the renderer)** — engine (a dropdown), samples,
+  fps, video format, trajectory sampling and the **Sequence resolution**. All of
+  them are written into every sequence's `sequence_config.json`, so a later headless
+  render reproduces them.
 * **Sequence resolution** — a preset list instead of free numbers, each label
   spelling out the pixels: *720p (1280×720)* — the default —, *1080p (1920×1080)*,
   *1K square (1024×1024)*, *2K (2048×1080)*, *4K (3840×2160)*, plus **Follow the
@@ -230,19 +256,19 @@ touching the file you have open: each sequence is rendered by a background
 Blender process running the standalone renderer, so the panel uses exactly the
 same code path a render farm does.
 
-* **Sequences** — point **Sequence root** at a generated tree (a scene folder, a
-  motion folder, or the whole output root) and press 🔄 to list what is there.
-  Or set **Sequence folder** to render one specific sequence. Folders already
-  containing a video are listed as `Skipped`.
+* **Sequences** — point **Sequence root** at a generated tree (the project's
+  `sequence/` folder, a scene folder, a motion folder, or the whole tree) and press
+  🔄 to list what is there. Or set **Sequence folder** to render one specific
+  sequence. Folders already containing a video are listed as `Skipped`.
 * The list shows `scene / motion / sequence` with a live per-row state
   (`pending` — `rendering` — `done` / `skipped` / `failed`), and failures show
-  their reason in the row.
-* Both sequence shapes render from here: a scene-copy sequence uses its own
-  `sequence_<id>.blend`, and an animation-only one is marked with a dot in the row
-  and is rendered by replaying its stored camera animation onto the source scene.
-* **Save to** — where the videos go. Defaults to
-  `<parent of Sequence root>/render_output`. **Flat output** writes every
-  sequence straight into that folder instead of the
+  their reason in the row. (The panel also has a **Quick actions → Render video**
+  button that fills this list in for you.)
+* Sequences are animation-only: each one is rendered by replaying its stored camera
+  animation onto the scene copy shipped in the project's `scene/` folder.
+* **Save to** — where the videos go. Defaults to the project's `video/` folder when
+  it can tell, otherwise `<parent of Sequence root>/render_output`. **Flat output**
+  writes every sequence straight into that folder instead of the
   `scene/motion/sequence` tree; the folder button opens it.
 * **Quality** — engine (EEVEE / Cycles / Workbench), resolution / FPS / samples
   with an explicit tick-box override each (unticked = keep the sequence's own
@@ -256,7 +282,7 @@ same code path a render farm does.
 ### Actions
 
 `Check configuration` · `Validate scenes` · **`Start generation`** · `Stop task`
-· `Open output folder` · `View error report` · `Export configuration` /
+· `Open project folder` · `View error report` · `Export configuration` /
 `Import configuration` · `Reset to defaults`.
 
 `Start generation` never blocks the UI: it queues the work and a Blender timer
@@ -282,19 +308,23 @@ add-on preferences, which survive a scene change).
 blender -b -P motion_pipeline_cli.py -- \
     --config batch.json \
     --scene-dir "D:\scenes" --recursive \
-    --output-root "D:\generated"
+    --output-root "D:\projects"
 
 # One scene that Blender already has open
 blender -b "D:\scenes\room001.blend" -P motion_pipeline_cli.py -- \
-    --include-current --output-root "D:\generated"
+    --include-current --output-root "D:\projects"
 
 # Select templates and narrow the frame range
 blender -b -P motion_pipeline_cli.py -- \
     --scenes "D:\scenes\room001.blend" \
-    --output-root "D:\generated" \
+    --output-root "D:\projects" \
     --templates "E:\UE\...\camera_motion_templates.json" \
     --motion-filter "dolly_*" --motion-filter "pan_right_01_standard" \
     --frames 1:120 --fps 24
+
+# Write the bare sequence tree instead of a project folder
+blender -b -P motion_pipeline_cli.py -- \
+    --scenes "D:\scenes\room001.blend" --sequence-root "D:\generated"
 
 # Report what would happen, without writing anything
 blender -b -P motion_pipeline_cli.py -- \
@@ -307,11 +337,33 @@ blender -b -P motion_pipeline_cli.py -- --config batch.json --check-only
 blender -b -P motion_pipeline_cli.py -- --print-config
 ```
 
-Exit codes: `0` success, `1` a generation problem, `2` bad configuration/inputs.
+`--output-root` is the **project folder** the dated project is created in (same
+layout as the panel); `--sequence-root` keeps the historical behaviour of writing
+the sequence tree straight into the folder you name. Exit codes: `0` success, `1` a
+generation problem, `2` bad configuration/inputs.
+
+`--no-sequence-blend` is still accepted and does nothing: sequences never write a
+scene copy any more, so there is nothing to switch off.
 
 ---
 
 ## Headless rendering
+
+Rendering a generated project needs nothing but the project folder::
+
+```bash
+# Render every sequence in a generated project (the folder renders itself)
+blender -b -P "<project>\render_sequences.py" -- \
+    --input-root "<project>\sequence" \
+    --output-root "<project>\video" \
+    --recursive
+```
+
+On the render node that is `render_project.sh` / `render_project.bat` (set
+`BLENDER` when Blender is not on `PATH`), and `RENDER_README.md` in the project
+folder repeats the commands. The renderer is the same file as
+`render/render_sequences.py` in this package; both resolve the package relative to
+themselves, so a copy beside the scripts works too.
 
 ```bash
 # Render the file Blender already has open
@@ -386,84 +438,101 @@ Supported flags: `--input`, `--input-root`, `--output`, `--output-root`,
 `--log-level`, `--log-file`, `--config`, `--path-map`, `--check-assets`,
 `--no-check-assets`, `--asset-report`, `--flat`, `--timeout`.
 
+### Making the project folder independent of the authoring machine
+
+The sequences are fine — they carry data, not paths. The `.blend` copies in
+`scene/` are the only thing that still refers to the machine that generated them
+(textures, linked libraries, caches). Two ways to deal with it:
+
+```bash
+# A. bridge the paths on the render node (repeatable; applies to scenes and assets)
+blender -b -P "<project>/render_sequences.py" -- \
+    --input-root "<project>/sequence" --output-root "<project>/video" \
+    --recursive --path-map "E:/UE/DataGenScenes=/mnt/data/DataGenScenes"
+
+# B. pack everything into the copies once, then the folder is portable
+blender -b -P "<project>/pack_textures.py" -- --scene-root "<project>/scene"
+```
+
+`pack_textures.py` opens every scene copy, packs its external files, saves it
+compressed in place and writes `pack_report.json` next to the `scene/` folder
+listing what was packed and what could not be found. Missing files are reported,
+never fatal. Useful flags: `--scene <file>` (one file), `--dry-run` (report only),
+`--list`, `--no-compress`, `--report <path>`.
+
 ---
 
 ## Output layout
 
-### Generated sequences
+A run writes one **project folder**: the sequence tree, the scenes it needs and the
+renderer, so the folder can be zipped to a render node as it is.
 
 ```text
-D:\generated\
-├── batch_config.json effective configuration for this run
-├── batch_report.json per-scene and per-sequence outcome
-├── manifest.json roll-up of every sequence + every failure
-└── room001\
-    └── dolly_in_01_standard\
-        ├── manifest.json
-        ├── sequence_000001\
-        │   ├── sequence_000001.blend      independent, renderable scene
-        │   ├── sequence_config.json       what the generator decided
-        │   ├── sequence_000001.json       camera trajectory + metadata
-        │   ├── sequence_000001_camera.txt camera trajectory, one row per frame
-        │   ├── validation_report.json     per-frame metrics + search log
-        │   └── generation_log.txt         step-by-step log for this sequence
-        └── sequence_000002\
-            └── ...
+D:\projects\                         <- the folder you pick (panel: Project folder)
+└── blender_camera_20260213\         <- created by the run (reused on the same day)
+    ├── project.json                 what this project is + the exact render command
+    ├── RENDER_README.md             the same commands, for the render node
+    ├── render_project.bat / .sh     launchers (BLENDER=... when not on PATH)
+    ├── render_sequences.py          headless renderer (root copy)
+    ├── pack_textures.py             optional: pack the scene copies
+    ├── blender_camera_motion_pipeline\   the package the renderer imports
+    ├── scene\                       a copy of every source .blend
+    │   └── room001.blend
+    ├── video\                       render output (--output-root)
+    └── sequence\                    the sequence tree (--input-root)
+        ├── batch_config.json        effective configuration for this run
+        ├── batch_report.json        per-scene and per-sequence outcome
+        ├── manifest.json            roll-up of every sequence + every failure
+        └── room001\
+            └── dolly_in_01_standard\
+                ├── manifest.json
+                ├── sequence_000001\
+                │   ├── sequence_config.json       what the generator decided
+                │   ├── sequence_000001.json       camera trajectory + metadata + animation
+                │   ├── sequence_000001_camera.txt camera trajectory, one row per frame
+                │   ├── validation_report.json     per-frame metrics + search log
+                │   └── generation_log.txt         step-by-step log for this sequence
+                └── sequence_000002\
+                    └── ...
 ```
+
+`--sequence-root <dir>` (CLI) writes the same `sequence/` tree contents straight
+into `<dir>`, without the project folder, for scripted runs that want exactly that.
+
 Sequence numbering restarts at `sequence_000001` inside each motion folder, so a
 motion folder is self-contained and re-running one motion never renumbers another.
 
-`sequence_<id>.blend` is a **complete copy of the scene** (that is what makes a
-sequence folder renderable on its own, anywhere, without the original file) plus
-the generated camera action, so it is written **compressed** — the animation
-itself is negligible next to the geometry and packed textures:
+**A sequence is animation-only.** It stores the camera animation it generated
+instead of a copy of the scene — ~150 KB instead of hundreds of MB — and the
+renderer replays it onto the scene shipped in `scene/`:
 
 | | measured on the 265.9 MB reference scene |
 |---|---|
 | scene source | 265.9 MB (already compressed) |
-| sequence blend, `compress=False` | 610.6 MB |
-| sequence blend, `compress=True` (default) | 264.9 MB |
-| animation only (no scene copy) | ≈ 150 KB |
-| packed textures carried by every scene copy | 172.3 MB |
+| a scene copy per sequence (the mode that was removed) | 264.9 MB compressed / 610.6 MB uncompressed |
+| **the animation payload, per sequence** | **≈ 150 KB** |
+| packed textures carried by the project's single scene copy | 172.3 MB |
 | geometry (2.29 M vertices / 3.3 M polygons) | the rest |
 | camera + its generated action alone | ≈ 5.4 MB as a `.blend`, ≈ 28 KB as JSON |
 
-Compression is not free: on that scene a 17-sequence batch took **100 s**
-uncompressed versus **349 s** compressed (zstd runs single-threaded while the
-writes are 2.3x smaller). If you would rather spend disk than time, sets
-`compress=False` — `tests/probe_blend_size.py` prints all of the numbers above for
-any scene of yours.
+So a 17-sequence project costs one scene copy (whatever your scene is) plus ~2.5 MB
+of sequences, instead of 4.4 GB of duplicated scenes.
 
-Everything but the blend is tiny (`sequence_<id>.json` ~110 KB, trajectory TXT
-13 KB), so the *only* thing that scales with sequence count is the scene copy per
-sequence. If you generate many sequences from one scene and would rather not
-duplicate it, turn the copy off with `--no-sequence-blend` (or the panel's **Save
-sequence .blend** toggle). The sequence then stores the camera animation instead of
-the scene:
+The payload records the values that were actually keyed — `location` in parent
+space, `rotation_quaternion`, `scale` and the camera data's `lens`, per frame — plus
+the interpolation and which constraints were muted for the bake, so replaying cannot
+drift from what the generator validated. `tests/probe_animation_only_equivalence.py`
+compares a replayed sequence against the trajectory the generator recorded: they
+agree to `1e-4` in the W2C matrix, i.e. single-precision residue on a coordinate
+431 m from the origin.
 
-| | per sequence | 17 sequences |
-|---|---|---|
-| scene copy (`save_sequence_blend=True`, default) | 264.9 MB (compressed) | 4.4 GB |
-| animation only (`--no-sequence-blend`) | **~150 KB** | **~2.5 MB** + one shared source scene |
-
-An animation-only sequence still renders: the renderer opens the source scene
-recorded in `sequence_config.json` (`sequence.source_blend`) and replays the keyed
-camera animation onto it from `sequence_<id>.json` →
-`camera_animation.samples`. The payload records the values that were actually
-keyed — `location` in parent space, `rotation_quaternion`, `scale` and the camera
-data's `lens`, per frame — plus the interpolation and which constraints were muted
-for the bake, so replaying cannot drift from what the generator validated.
-`tests/probe_animation_only_equivalence.py` proves the two shapes agree: on the
-reference scene the same template rendered through both storage modes differs by
-`1e-4` in the W2C matrix, i.e. single-precision residue on a coordinate 431 m from
-the origin, and the animation-only path is the *more* accurate of the two when
-compared against the generator's own trajectory.
-
-The trade-off is self-containment: a blend-based sequence folder renders anywhere
-on its own, an animation-only one needs the source scene reachable from the render
-node (`--path-map` remaps asset paths, and the same applies here). `--list` shows
-which shape each sequence uses (`[blend]` / `[animation]`), and
-`tests/probe_blend_size.py` prints the numbers for your own scene.
+The trade-off is that the scene must travel with the sequences — which is exactly
+what the project folder does, in `scene/`, with `source_scene_rel` recorded so the
+folder keeps working after it is moved. Textures inside those `.blend`s still point
+at the machine that generated them: either bridge them with `--path-map`, or run
+`pack_textures.py` once to pack them into the copies. `--list` shows the storage
+mode of every sequence, and `tests/probe_blend_size.py` prints the numbers above for
+your own scene.
 
 ### Rendered videos
 
@@ -551,12 +620,11 @@ One JSON document drives both the panel and the CLI. See
 {
   "schema_version": 1,
   "batch": {
-    "output_root": "D:/generated_sequences",
+    "output_root": "D:/projects",
     "mode": "none",
     "scene_name_mode": "stem",
     "overwrite": false,
     "resume": true,
-    "save_sequence_blend": true,
     "save_validation_report": true,
     "character_asset_root": "",
     "animation_asset_root": "",
@@ -607,7 +675,8 @@ One JSON document drives both the panel and the CLI. See
 
 Keys are accepted in `snake_case`, `camelCase`, `kebab-case` or `UPPER_CASE`.
 Unknown keys produce a warning instead of failing, so a config written for a
-newer build still runs.
+newer build still runs — including the removed `batch.save_sequence_blend`, which
+is now ignored rather than honoured (no sequence stores a scene copy any more).
 
 ---
 
@@ -873,50 +942,53 @@ not been produced from real MetaHuman or Blender rigs here.** See
 ## Testing
 
 ```bash
-# Everything (pure suites + Blender suites) — 187 cases
-blender -b -P blender_motion_pipeline/tests/run_blender_tests.py
+# Everything (pure suites + Blender suites) — 208 cases
+blender -b -P blender_camera_motion_pipeline/tests/run_blender_tests.py
 
-# Pure suites only, no Blender required (97 cases)
-python blender_motion_pipeline/tests/run_blender_tests.py
+# Pure suites only, no Blender required (118 cases)
+python blender_camera_motion_pipeline/tests/run_blender_tests.py
 
-# Individual suites
-blender -b -P blender_motion_pipeline/tests/test_blender_integration.py
-blender -b -P blender_motion_pipeline/tests/test_animation_api.py
-python blender_motion_pipeline/tests/test_motion_templates.py
+# Individual suites (each one also runs on its own)
+blender -b -P blender_camera_motion_pipeline/tests/test_blender_integration.py
+blender -b -P blender_camera_motion_pipeline/tests/test_animation_api.py
+python blender_camera_motion_pipeline/tests/test_project_layout.py
+
+# Probes are standalone too; tests/_boot.py makes the add-on importable whatever
+# the package folder is called (it is registered under its historical name).
 
 # Axis-convention sanity probe (prints what each motion family actually does)
-python blender_motion_pipeline/tests/probe_axes.py
+python blender_camera_motion_pipeline/tests/probe_axes.py
 
 # Background MP4 rendering smoke test
-blender -b -P blender_motion_pipeline/tests/smoke_render.py
+blender -b -P blender_camera_motion_pipeline/tests/smoke_render.py
 
 # Full end-to-end acceptance run through the CLI + renderer
-blender -b -P blender_motion_pipeline/tests/verify_end_to_end.py
+blender -b -P blender_camera_motion_pipeline/tests/verify_end_to_end.py
 
 # Bake algebra vs mathutils, for random rigs / parent offsets / poses
-blender -b -P blender_motion_pipeline/tests/probe_bake_math.py
+blender -b -P blender_camera_motion_pipeline/tests/probe_bake_math.py
 
 # Does a batch anchor every sequence on the same camera pose?
-blender -b -P blender_motion_pipeline/tests/probe_anchor_drift.py -- "<scene.blend>" ["<templates.json>" [count]]
+blender -b -P blender_camera_motion_pipeline/tests/probe_anchor_drift.py -- "<scene.blend>" ["<templates.json>" [count]]
 
 # Does the panel configuration survive a run that opens other scenes?
-blender -b -P blender_motion_pipeline/tests/probe_settings_persistence.py
+blender -b -P blender_camera_motion_pipeline/tests/probe_settings_persistence.py
 
 # Are every icon identifier the UI passes to ``label(icon=...)`` valid here?
-blender -b -P blender_motion_pipeline/tests/probe_icons.py
+blender -b -P blender_camera_motion_pipeline/tests/probe_icons.py
 
 # Does every sequence in a generated tree render the path it recorded?
-blender -b -P blender_motion_pipeline/tests/probe_all_sequences.py -- "<sequence root>"
+blender -b -P blender_camera_motion_pipeline/tests/probe_all_sequences.py -- "<sequence root>"
 
 # What makes EEVEE slow on a given sequence (raytracing, lights, polygons)
-blender -b -P blender_motion_pipeline/tests/probe_render_cost.py -- "<sequence.blend>"
+blender -b -P blender_camera_motion_pipeline/tests/probe_render_cost.py -- "<sequence.blend>"
 
 # Where the bytes in a sequence .blend come from, and what each storage choice costs
-blender -b -P blender_motion_pipeline/tests/probe_blend_size.py -- "<scene.blend>" "<sequence.blend>"
+blender -b -P blender_camera_motion_pipeline/tests/probe_blend_size.py -- "<scene.blend>" "<sequence.blend>"
 
-# Do both storage modes (scene copy / animation only) give the same camera path?
-blender -b -P blender_motion_pipeline/tests/probe_animation_only_equivalence.py -- \
-    "<sequence.blend>" "<animation-only sequence dir>"
+# A generated sequence replays to the path the generator recorded
+blender -b -P blender_camera_motion_pipeline/tests/probe_animation_only_equivalence.py -- \
+    "<sequence dir>"
 ```
 
 `MP_KEEP_TEST_OUTPUT=1` keeps the integration artifacts for inspection;
@@ -929,28 +1001,32 @@ tracebacks.
 |---|---|---|
 | `test_path_utils` | 16 | pass |
 | `test_config` | 18 | pass |
-| `test_motion_templates` | 30 | pass |
-| `test_camera_validation` | 37 | pass |
+| `test_project_layout` | 15 | pass |
+| `test_motion_templates` | 31 | pass |
+| `test_camera_validation` | 38 | pass |
 | `test_animation_api` | 10 | pass |
 | `test_addon_lifecycle` | 10 | pass |
 | `test_render_workflow` | 18 | pass |
-| `test_blender_integration` | 48 | pass |
-| **Total** | **187** | **pass** |
+| `test_blender_integration` | 52 | pass |
+| **Total** | **208** | **pass** |
 
 `tests/static_check.py` also reports no unused imports or leftover debug markers
-across all 74 Python files.
+across every Python file in the package, and one integration case drives every
+panel's `draw()` against a stub layout — a panel that reads a property which no
+longer exists would otherwise only fail when a user opens the sidebar.
 
-End-to-end acceptance: **9/9 stages**
+End-to-end acceptance: **10/10 stages**
 
 1. Build 3 fixture scenes.
-2. CLI dry-run reports the matrix (20 sequences).
-3. CLI generates 20 sequences with the real 80-template document.
-4. Generated artifacts match the documented layout (20 checked).
-5. Headless render produces 20 videos.
-6. Every video has its JSON + trajectory TXT beside it.
-7. `ffprobe` confirms H.264 and 81 frames per video.
-8. Re-running the renderer skips finished sequences and exits 0.
-9. `--list` enumerates sequences and their state.
+2. CLI dry-run reports the matrix.
+3. CLI generates the sequences with the real 80-template document.
+4. The project folder is self-contained (scene copies + render toolkit).
+5. Generated artifacts match the documented layout.
+6. The project's *own* copy of the renderer produces the videos.
+7. Every video has its JSON + trajectory TXT beside it.
+8. `ffprobe` confirms H.264 and 81 frames per video.
+9. Re-running the renderer skips finished sequences and exits 0.
+10. `--list` enumerates sequences and their state.
 
 The add-on was also installed into a real Blender add-ons folder and verified to
 enable, expose all 19 operators and 8 panels, discover and pre-fill the template
@@ -967,8 +1043,9 @@ assets.
 ## Architecture
 
 ```text
-blender_motion_pipeline/
+blender_camera_motion_pipeline/
 ├── __init__.py add-on entry (bl_info + register/unregister)
+├── _bootstrap.py make the package importable whatever the folder is called
 ├── registration.py registration order, reload, preference defaults
 ├── properties.py scene PropertyGroup  <->  BatchConfig
 ├── operators.py the panel operators (+ the generation/render timers)
@@ -978,6 +1055,7 @@ blender_motion_pipeline/
 ├── config/
 │   ├── models.py typed config dataclasses, lenient parsing, validation
 │   ├── defaults.py defaults + template discovery
+│   ├── panel_state.py the remembered panel configuration
 │   ├── schema.json        JSON schema
 │   ├── example_config.json
 │   └── camera_motion_templates.json bundled fallback set
@@ -986,6 +1064,8 @@ blender_motion_pipeline/
 │   ├── blender_context.py camera snapshots, geometry harvest, restore
 │   ├── sequence_generator.py one sequence: validate -> search -> bake -> write
 │   ├── batch_runner.py scenes x motions x cameras x characters
+│   ├── project.py the self-contained project folder a run writes
+│   ├── camera_animation.py the animation payload + how it is replayed
 │   ├── sequence_manager.py read-only view of the output tree
 │   └── ui_task.py incremental, cancellable timer state machine
 ├── camera/                camera maths and checks
@@ -1006,6 +1086,7 @@ blender_motion_pipeline/
 │   └── resource_check.py missing-asset scanning
 ├── render/
 │   ├── render_sequences.py standalone headless renderer
+│   ├── pack_textures.py    pack a scene copy's external files into it
 │   ├── render_runner.py panel render driver (child Blender processes)
 │   └── metadata_exporter.py JSON + trajectory writers for the renderer
 ├── utils/
@@ -1014,6 +1095,7 @@ blender_motion_pipeline/
 │   ├── animation.py version-agnostic Action/F-Curve access
 │   └── version.py version stamping
 └── tests/                 harness + suites + probes (see Testing)
+    └── _boot.py           registers the package name for standalone runs
 ```
 Design rules the code actually follows:
 
@@ -1063,14 +1145,13 @@ Requires Blender **3.6+**; verified on **5.2.2**. No third-party Python packages
 2. **Geometry tests are ray- and AABB-based.** Thin single-sided planes are hit
    reliably head-on but can be grazed; very dense meshes make the search slower.
    Clearance is sampled along 26 directions, not evaluated analytically.
-3. **`sequence.blend` is written once per sequence from the batch/CLI path.** The
-   *panel's* timer-driven run cannot call `save_as_mainfile` (Blender crashes with
-   an access violation when the file writer re-enters the main loop from a timer),
-   so panel runs queue those writes and flush them at the end — only the last
-   processed scene state is available then. For exact per-sequence blends, use the
-   CLI; turning **Save sequence .blend** off is also a first-class choice now: the
-   sequence stores the camera animation instead and the renderer replays it onto
-   the source scene (see [Generated sequences](#generated-sequences)).
+3. **Scenes are copied, not referenced.** A run copies every queued `.blend` into
+   the project's `scene/` folder and generates from the copy, so the project is
+   self-contained — which costs one scene's worth of disk per project (a 265 MB
+   scene costs 265 MB, and re-running the same day reuses the copy instead of
+   re-copying it). Textures inside those copies still point at the machine that
+   generated them until you run `pack_textures.py` or map the paths with
+   `--path-map`.
 4. **Resolution is a render-time decision.** Generation does not resize the
    scene; it records resolution/fps/engine in `sequence_config.json` and the
    renderer applies them. Frame *rate* is written to the sequence file

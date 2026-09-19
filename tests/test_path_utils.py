@@ -10,6 +10,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _boot  # noqa: E402,F401  (the add-on folder may be called anything)
 
 from blender_motion_pipeline.io import json_io, manifest, resource_check  # noqa: E402
 from blender_motion_pipeline.io import path_utils as pu  # noqa: E402

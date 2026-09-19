@@ -20,6 +20,9 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 ALLOW = {
     "annotations",
     "__future__",
+    # Imported for its side effect: it registers the add-on package under the name
+    # the test modules import (see tests/_boot.py).
+    "_boot",
 }
 
 #: Files where an import exists only to keep a public API available.
@@ -30,6 +33,7 @@ REEXPORT_HINTS = ("__init__.py", "base_provider.py")
 #: belongs here: a probe's entire purpose is to print what it measured.
 SKIP_DEBUG_SCAN = {
     "static_check.py",          # the patterns are defined here
+    "_boot.py",                 # prints its state when run as a script
     "make_e2e_scenes.py",       # a generated Blender fixture script reports progress
     "harness.py",               # the test harness prints results
     "run_blender_tests.py",
@@ -52,6 +56,7 @@ SKIP_DEBUG_SCAN = {
     "smoke_render.py",
     "motion_pipeline_cli.py",
     "render_sequences.py",
+    "pack_textures.py",          # a standalone command-line tool: printing is its UI
     "operators.py",
     "test_blender_integration.py",
     "test_render_workflow.py",   # reports fixture setup
@@ -133,6 +138,10 @@ def check_markdown(path: pathlib.Path) -> "list[str]":
     character it cannot map with ``U+FFFD`` -- irreversibly.  That happened once
     to ``README.md`` (via ``Set-Content -Encoding UTF8``) and cost a full manual
     repair, so it is a hard failure here now.
+
+    East-Asian characters are treated as mojibake in the English docs, but a
+    deliberately Chinese document (``*.zh-CN.md``) is nothing but those
+    characters -- for it only the ``U+FFFD`` check applies.
     """
     problems: "list[str]" = []
     try:
@@ -145,6 +154,8 @@ def check_markdown(path: pathlib.Path) -> "list[str]":
             f"{text.count(chr(0xFFFD))} U+FFFD replacement character(s): the file was "
             "round-tripped through a lossy code page"
         )
+    if ".zh" in path.name:
+        return problems
     # These docs are English prose plus box art; East-Asian or private-use
     # characters here mean mojibake, never content.
     for index, line in enumerate(text.splitlines(), start=1):

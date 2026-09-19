@@ -441,7 +441,7 @@ class MPP_PT_validation(_MPPPanel, Panel):
 
 
 class MPP_PT_output(_MPPPanel, Panel):
-    """Where sequences go and how they are written."""
+    """The project folder a run writes, and how the sequences are written."""
 
     bl_idname = "MPP_PT_output"
     bl_label = "Sequence output"
@@ -451,14 +451,20 @@ class MPP_PT_output(_MPPPanel, Panel):
         layout = self.layout
         group = context.scene.mpp
 
-        layout.prop(group, "output_root", text="")
+        layout.prop(group, "output_root", text="Project folder")
+        # The project tree is created inside the folder above; show exactly what
+        # that means, because the folder the user picks is *not* the sequence root.
+        box = layout.box()
+        box.label(text="Project written on generation", icon="FILE_FOLDER")
+        for line in group.project_summary().splitlines():
+            box.label(text=line)
+
         row = layout.row(align=True)
-        row.prop(group, "save_sequence_blend")
         row.prop(group, "save_validation_report")
-        row = layout.row(align=True)
         row.prop(group, "overwrite")
+        row = layout.row(align=True)
         row.prop(group, "resume")
-        layout.prop(group, "verbose_logging")
+        row.prop(group, "verbose_logging")
         layout.prop(group, "camera_selection")
 
         box = layout.box()

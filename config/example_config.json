@@ -6,7 +6,6 @@
     "scene_name_mode": "stem",
     "overwrite": false,
     "resume": true,
-    "save_sequence_blend": true,
     "save_validation_report": true,
     "verbose": true,
     "character_asset_root": "",

@@ -18,7 +18,6 @@
         "scene_name_mode": { "type": "string", "enum": ["stem", "filename"] },
         "overwrite": { "type": "boolean" },
         "resume": { "type": "boolean" },
-        "save_sequence_blend": { "type": "boolean" },
         "save_validation_report": { "type": "boolean" },
         "verbose": { "type": "boolean" },
         "character_asset_root": { "type": "string" },

@@ -34,6 +34,7 @@ if os.path.isfile(_BOOTSTRAP):
 SUITES = (
     ("test_path_utils", "pure"),
     ("test_config", "pure"),
+    ("test_project_layout", "pure"),
     ("test_motion_templates", "pure"),
     ("test_camera_validation", "pure"),
     ("test_animation_api", "blender"),

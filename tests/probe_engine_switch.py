@@ -20,6 +20,8 @@ _PACKAGE_PARENT = os.path.dirname(os.path.dirname(_HERE))
 for path in (_PACKAGE_PARENT, _HERE):
     if path not in sys.path:
         sys.path.insert(0, path)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _boot  # noqa: E402,F401  (the add-on folder may be called anything)
 
 import bpy  # noqa: E402
 
@@ -69,7 +71,6 @@ def run(engine: str) -> None:
     group.character_mode = "none"
     group.overwrite = True
     group.resume = False
-    group.save_sequence_blend = True
     group.validation_sample_step = 100
     group.file_path = blend
     bpy.ops.mpp.add_files()
@@ -92,7 +93,8 @@ def run(engine: str) -> None:
     print(f"  engine AFTER generation         : {bpy.context.scene.render.engine}")
     print(f"  file Blender now has open       : {bpy.data.filepath}")
 
-    sequence = os.path.join(group.output_root, "scene_" + engine.lower(),
+    sequence = os.path.join(ui_task.snapshot().get("project_folder", group.output_root),
+                            "sequence", "scene_" + engine.lower(),
                             "fixed_01_standard", "sequence_000001")
     config = os.path.join(sequence, "sequence_config.json")
     if os.path.isfile(config):

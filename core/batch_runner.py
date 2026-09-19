@@ -88,6 +88,8 @@ class BatchReport:
     started_utc: str = ""
     finished_utc: str = ""
     output_root: str = ""
+    project_root: str = ""
+    project: dict = field(default_factory=dict)
     character_mode: str = CHARACTER_MODE_NONE
     template_source: str = ""
     template_names: "list[str]" = field(default_factory=list)
@@ -128,6 +130,8 @@ class BatchReport:
             "started_utc": self.started_utc,
             "finished_utc": self.finished_utc,
             "output_root": to_forward_slashes(self.output_root),
+            "project_root": to_forward_slashes(self.project_root),
+            "project": dict(self.project),
             "character_mode": self.character_mode,
             "character_provider": dict(self.provider),
             "template_source": to_forward_slashes(self.template_source),
@@ -163,6 +167,8 @@ class BatchReport:
             f"  scenes        : {len(self.scenes)}",
             f"  sequences     : {self.generated} generated, {self.failed} failed, {self.skipped} skipped",
         ]
+        if self.project_root:
+            lines.insert(2, f"  project       : {self.project_root}")
         for scene in self.scenes:
             flag = "ok  " if scene.ok else ("skip" if scene.skipped else "FAIL")
             lines.append(
@@ -179,6 +185,13 @@ class BatchReport:
         return "\n".join(lines)
 
 
+def _blender_version() -> str:
+    """The running Blender version, for the project manifest ("" outside Blender)."""
+    from .project import blender_version
+
+    return blender_version()
+
+
 class BatchRunner:
     """Drive the whole generation pipeline."""
 
@@ -192,9 +205,17 @@ class BatchRunner:
         task: TaskController | None = None,
         provider: CharacterProvider | None = None,
         camera_selection: str = "all",
+        project_layout=None,
     ):
         self.config = config
-        self.output_root = normalize_path(output_root or config.batch.output_root)
+        #: The project folder this run writes into (``None`` for a bare sequence
+        #: tree, which is what the test suite and other embedders use).
+        self.project_layout = project_layout
+        self.output_root = normalize_path(
+            project_layout.sequence_root if project_layout is not None
+            else (output_root or config.batch.output_root)
+        )
+        self.project_root = normalize_path(project_layout.root) if project_layout is not None else ""
         self.logger = logger or get_logger("batch_runner")
         self.task = task or TaskController(name="batch")
         self.entries: "list[SceneEntry]" = list(scene_entries or [])
@@ -202,6 +223,29 @@ class BatchRunner:
         self._provider = provider
 
     # -- setup -----------------------------------------------------------
+    def stage_scenes(self) -> "list[str]":
+        """Copy every queued scene into the project folder and generate from it.
+
+        Returns problem strings.  Doing this *before* generation is what makes the
+        shipped project self-contained: the sequences are generated from the exact
+        file that ships beside them, and each sequence can record where that file
+        lives relative to the project root.
+        """
+        if self.project_layout is None:
+            return []
+        problems: "list[str]" = []
+        for entry in self.entries:
+            if getattr(entry, "original_path", ""):
+                continue  # already staged by an earlier call
+            try:
+                copy = self.project_layout.stage_scene(entry.path, logger=self.logger)
+            except Exception as exc:  # OSError, ProjectError
+                problems.append(f"scene could not be copied into the project: {entry.path} ({exc})")
+                continue
+            entry.original_path = entry.path
+            entry.path = copy
+        return problems
+
     def preflight(self) -> "list[str]":
         """Return configuration problems that would make the run meaningless."""
         problems = validate_batch_config(self.config, require_output=True)
@@ -211,7 +255,7 @@ class BatchRunner:
         for entry in missing:
             problems.append(f"scene file does not exist: {entry.path}")
         try:
-            ensure_dir(self.output_root)
+            ensure_dir(self.project_layout.project_root if self.project_layout else self.output_root)
         except OSError as exc:
             problems.append(f"output folder is not writable: {self.output_root} ({exc})")
         return problems
@@ -243,9 +287,17 @@ class BatchRunner:
         report = BatchReport(
             started_utc=utc_now_iso(),
             output_root=self.output_root,
+            project_root=self.project_root,
             character_mode=self.config.batch.mode,
             camera_selection=self.camera_selection,
         )
+        if self.project_layout is not None:
+            # Copy the scenes in first: generation must run against the files that
+            # ship with the project, not the originals they were copied from.
+            staging = self.stage_scenes()
+            report.warnings.extend(staging)
+            for problem in staging:
+                self.logger.error("%s", problem)
         try:
             library = library or self.load_library()
         except Exception as exc:
@@ -308,7 +360,7 @@ class BatchRunner:
         load = open_scene_for_generation(
             entry,
             safe_copy=False,           # generation works on copies of datablocks, never the file
-            scratch_dir=os.path.join(self.output_root, "_scratch"),
+            scratch_dir=os.path.join(self.project_root or self.output_root, "_scratch"),
         )
         outcome.load = load.to_dict()
         outcome.warnings.extend(load.warnings)
@@ -346,6 +398,7 @@ class BatchRunner:
             character_provider=provider,
             logger=self.logger,
             task=self.task,
+            project_layout=self.project_layout,
         )
         requests = generator.build_requests(
             entry,
@@ -447,6 +500,8 @@ class BatchRunner:
         config_payload = self.config.to_dict()
         config_payload["_effective"] = {
             "output_root": to_forward_slashes(self.output_root),
+            "project_root": to_forward_slashes(self.project_root),
+            "project_folder": to_forward_slashes(self.project_layout.root) if self.project_layout else "",
             "camera_selection": self.camera_selection,
             "template_source": to_forward_slashes(report.template_source),
             "template_names": list(report.template_names),
@@ -504,6 +559,33 @@ class BatchRunner:
         if report.cancelled:
             report.errors.append(f"run cancelled: {report.cancel_reason}")
 
+        if self.project_layout is not None:
+            # Ship the renderer, the scene list and the exact render command with
+            # the sequences: this is what makes the folder renderable on a server.
+            try:
+                scenes = [
+                    self.project_layout.relative_scene(target) or target
+                    for _, target in self.project_layout.scene_copies
+                ]
+                self.project_layout.write_readme(
+                    scenes=[name for name in scenes if name],
+                    blender_version=_blender_version(),
+                )
+                report.project = self.project_layout.to_dict()
+                self.project_layout.write_manifest(
+                    metadata={
+                        "character_mode": self.config.batch.mode,
+                        "template_source": to_forward_slashes(report.template_source),
+                        "template_names": list(report.template_names),
+                        "camera_selection": self.camera_selection,
+                        "generator_version": GENERATOR_VERSION,
+                        "render_input_root": to_forward_slashes(self.output_root),
+                    },
+                    blender_version=_blender_version(),
+                )
+            except Exception as exc:
+                report.warnings.append(f"could not finalise the project folder: {exc}")
+
     # -- static helpers --------------------------------------------------
     @staticmethod
     def inspect_output_tree(output_root: str) -> dict:
@@ -521,6 +603,7 @@ def run_batch(
     logger=None,
     progress=None,
     camera_selection: str = "all",
+    project_layout=None,
 ) -> BatchReport:
     """Convenience wrapper used by the CLI and the add-on operator."""
     task = TaskController(name="batch", progress_callback=progress)
@@ -531,6 +614,7 @@ def run_batch(
         logger=logger,
         task=task,
         camera_selection=camera_selection,
+        project_layout=project_layout,
     )
     return runner.run()
 

@@ -15,6 +15,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _boot  # noqa: E402,F401  (the add-on folder may be called anything)
 
 from blender_motion_pipeline.camera import camera_export as ce  # noqa: E402
 from blender_motion_pipeline.camera import camera_search as cs  # noqa: E402
@@ -577,8 +579,14 @@ def build_suite() -> Suite:
         ok(any(abs(c.focal_scale - 1.0) > 1e-9 for c in rich), "focal variants must be present")
         ok(any(c.rotation_adjust_deg > 1.0 for c in rich), "rotation variants must be present")
 
-    @suite.case("apply_candidate bakes rotation and focal into the animation")
+    @suite.case("apply_candidate bakes the focal step, not the orientation")
     def _():
+        # The orientation is the *callback's* job: it receives the candidate and
+        # folds ``rotation_adjust`` into the base matrix, so the template's offsets
+        # are built in the rotated frame.  Applying the turn here as well used to
+        # double-apply it while leaving the path along the pre-rotation view axis --
+        # an accepted candidate then moved the camera sideways (76-99 deg off its own
+        # view axis on the reference scene).
         animation = _straight_animation((0, 0, 1.6), (0, 1, 1.6), frames=3, focal=40.0)
         candidate = cs.SearchCandidate(
             index=0, offset=(0.0, 0.0, 0.0), position=(0.0, 0.0, 1.6),
@@ -588,9 +596,51 @@ def build_suite() -> Suite:
         equal(len(baked.samples), len(animation.samples))
         close(baked.samples[0].focal, 60.0)
         close(mt.quat_angle_between(baked.samples[0].quaternion, animation.samples[0].quaternion),
-              15.0, tol=1e-6)
+              0.0, tol=1e-9)
+        # Positions are untouched here too: they come from the regenerated animation.
+        vec_close(baked.samples[0].position, animation.samples[0].position, tol=1e-9)
         # The original must not be mutated.
         close(animation.samples[0].focal, 40.0)
+
+    @suite.case("a rotated base orientation carries the template motion with it")
+    def _():
+        # What the search relies on: turn the camera, and a forward push follows the
+        # *new* forward.  This is the mechanic that keeps an accepted candidate's
+        # motion in its own frame instead of sliding sideways.
+        import math as _math
+
+        generator = mt.MotionTemplateGenerator()
+        template = mt.MotionTemplate.from_dict({
+            "id": "push", "keys": [
+                {"frame": 0, "location": [0, 0, 0], "rotation": [0, 0, 0], "focal": 35},
+                {"frame": 4, "location": [400, 0, 0], "rotation": [0, 0, 0], "focal": 35},
+            ],
+        })
+        # A camera looking along +X, turned 90 deg about Z so it looks along +Y.
+        base = [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]
+        for label, turn in (("unrotated", None), ("turned", mt.quat_from_axis_angle("Z", 90.0))):
+            matrix = [list(row) for row in base]
+            quaternion = mt.matrix_to_quaternion(base)
+            if turn is not None:
+                adjustment = mt.quaternion_to_matrix(turn)
+                matrix = [
+                    [sum(adjustment[i][k] * base[k][j] for k in range(3)) for j in range(3)]
+                    + [0.0]
+                    for i in range(3)
+                ] + [[0.0, 0.0, 0.0, 1.0]]
+                quaternion = mt.quat_multiply(turn, quaternion)
+            animation = generator.generate(template, base_matrix=matrix, base_focal=35.0,
+                                           base_quaternion=quaternion)
+            start = animation.samples[0]
+            end = animation.samples[-1]
+            delta = mt.vec_sub(end.position, start.position)
+            right, up, forward = mt.axis_basis(matrix)
+            along_forward = mt.vec_length(delta) and sum(
+                a * b for a, b in zip(delta, forward)
+            ) / mt.vec_length(delta)
+            close(mt.vec_length(delta), 4.0, tol=1e-6, message=f"{label}: 4 m push")
+            close(along_forward, 1.0, tol=1e-6,
+                  message=f"{label}: the push must follow the camera's own view axis")
 
     @suite.case("world_to_camera_row produces a valid OpenCV extrinsic")
     def _():

@@ -28,6 +28,8 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 _PACKAGE_PARENT = os.path.dirname(os.path.dirname(_HERE))
 if _PACKAGE_PARENT not in sys.path:
     sys.path.insert(0, _PACKAGE_PARENT)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _boot  # noqa: E402,F401  (the add-on folder may be called anything)
 
 from blender_motion_pipeline.tests.harness import Suite, equal, ok  # noqa: E402
 
@@ -323,7 +325,6 @@ def build_suite() -> Suite:
             ok(group.search_max_radius >= group.search_min_radius)
             equal(group.trajectory_mode, "all_frames")
             equal(group.video_format, "mp4")
-            ok(group.save_sequence_blend is True)
             equal(len(group.scene_list), 0)
             equal(group.task_state, "idle")
             # The config projection must validate.

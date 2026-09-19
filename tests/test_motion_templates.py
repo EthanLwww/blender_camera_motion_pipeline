@@ -17,6 +17,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _boot  # noqa: E402,F401  (the add-on folder may be called anything)
 
 from blender_motion_pipeline.camera import motion_templates as mt  # noqa: E402
 from blender_motion_pipeline.config import defaults  # noqa: E402
@@ -565,6 +567,45 @@ def build_suite() -> Suite:
         # Rotating about +X by +90 must send -Z to +Y (Blender camera up).
         vec_close(mt.quat_rotate(mt.quat_from_axis_angle("X", 90.0), (0.0, 0.0, -1.0)),
                   (0.0, 1.0, 0.0), tol=1e-9)
+
+    @suite.case("a scaled camera matrix does not scale the motion or bend its axis")
+    def _():
+        # Regression, measured on the user's scene: one camera carries scale 0.542, so
+        # its world matrix is ``0.542 * R``.  ``axis_basis`` used the raw columns (not
+        # unit) and ``matrix_to_quaternion`` read a **24.7 deg** wrong orientation from
+        # it, which made a 3.4 m forward push travel 1.843 m at 22 deg off the camera's
+        # own view axis.
+        generator = mt.MotionTemplateGenerator()
+        template = mt.MotionTemplate.from_dict({
+            "id": "push", "keys": [
+                {"frame": 0, "location": [0, 0, 0], "rotation": [0, 0, 0], "focal": 35},
+                {"frame": 4, "location": [340, 0, 0], "rotation": [0, 0, 0], "focal": 35},
+            ],
+        })
+        rotation = mt.quaternion_to_matrix(mt.quat_from_axis_angle("Z", 37.0))
+        unit_matrix = [list(row) + [0.0] for row in rotation] + [[0.0, 0.0, 0.0, 1.0]]
+
+        reference = generator.generate(template, base_matrix=unit_matrix, base_focal=35.0)
+        reference_delta = mt.vec_sub(reference.samples[-1].position, reference.samples[0].position)
+
+        for scale in (0.542, 0.5, 2.0):
+            scaled = [[value * scale for value in row[:3]] + [row[3]] for row in unit_matrix]
+            right, up, forward = mt.axis_basis(scaled)
+            for name, axis in (("right", right), ("up", up), ("forward", forward)):
+                close(mt.vec_length(axis), 1.0, tol=1e-9, message=f"{name} at scale {scale}")
+            # The extracted orientation must be the true rotation, not a bent one.
+            close(
+                mt.quat_angle_between(
+                    mt.matrix_to_quaternion(unit_matrix), mt.matrix_to_quaternion(scaled)
+                ),
+                0.0, tol=1e-9, message=f"orientation at scale {scale}",
+            )
+            animation = generator.generate(template, base_matrix=scaled, base_focal=35.0)
+            delta = mt.vec_sub(animation.samples[-1].position, animation.samples[0].position)
+            close(mt.vec_length(delta), mt.vec_length(reference_delta), tol=1e-9,
+                  message=f"push distance at scale {scale}")
+            vec_close(delta, reference_delta, tol=1e-9,
+                      message=f"push direction at scale {scale}")
 
     @suite.case("embedded fallback templates are usable")
     def _():

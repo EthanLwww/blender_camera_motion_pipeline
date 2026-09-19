@@ -156,6 +156,48 @@ def quat_to_euler_xyz(q: Sequence[float]) -> Vec3:
     return (rx, ry, rz)
 
 
+def orthonormal_axes(camera_matrix: Sequence[Sequence[float]]) -> "tuple[Vec3, Vec3, Vec3]":
+    """``(x, y, z)`` columns of a world matrix, made orthonormal and right-handed.
+
+    A camera object can carry a scale -- the reference scene has one at **0.542**
+    -- and then its world matrix is ``s * R`` rather than ``R``.  Everything in this
+    module assumes an orthonormal frame, and feeding it a scaled matrix is not a
+    rounding-level mistake:
+
+    * the template offsets are built by multiplying these axes, so every motion came
+      out scaled by 0.542 (a 3.4 m push travelled 1.843 m);
+    * ``matrix_to_quaternion`` read a 24.7 deg wrong orientation from that matrix,
+      which pointed the motion 22 deg away from the camera's own view axis.
+
+    Uniform scale is undone by normalising each column; a non-uniform one is
+    repaired with Gram-Schmidt, which keeps the first axis and the plane of the
+    first two (the best a shear-free basis can do).
+    """
+    x = vec_normalized([float(camera_matrix[i][0]) for i in range(3)])
+    y_raw = [float(camera_matrix[i][1]) for i in range(3)]
+    z_raw = [float(camera_matrix[i][2]) for i in range(3)]
+    y = [y_raw[i] - sum(y_raw[j] * x[j] for j in range(3)) * x[i] for i in range(3)]
+    if vec_length(y) < 1e-9:
+        # Degenerate: pick any axis perpendicular to x.
+        y = [0.0, 1.0, 0.0] if abs(x[1]) < 0.9 else [1.0, 0.0, 0.0]
+        y = [y[i] - sum(y[j] * x[j] for j in range(3)) * x[i] for i in range(3)]
+    y = vec_normalized(y)
+    z = (
+        x[1] * y[2] - x[2] * y[1],
+        x[2] * y[0] - x[0] * y[2],
+        x[0] * y[1] - x[1] * y[0],
+    )
+    # Keep the original handedness: a mirrored matrix must not silently flip.
+    if sum(z[i] * z_raw[i] for i in range(3)) < 0.0:
+        z = (-z[0], -z[1], -z[2])
+        y = (
+            z[1] * x[2] - z[2] * x[1],
+            z[2] * x[0] - z[0] * x[2],
+            z[0] * x[1] - z[1] * x[0],
+        )
+    return (x, y, z)
+
+
 def axis_basis(camera_matrix: Sequence[Sequence[float]]) -> "tuple[Vec3, Vec3, Vec3]":
     """Return ``(right, up, forward)`` unit axes of a camera-to-world matrix.
 
@@ -163,10 +205,12 @@ def axis_basis(camera_matrix: Sequence[Sequence[float]]) -> "tuple[Vec3, Vec3, V
     third column negated, not the third column itself.  Getting this backwards
     silently turns every forward dolly into a backward one, so it is asserted
     directly in ``tests/test_motion_templates.py``.
+
+    The axes are **unit length whatever the camera's scale is**
+    (:func:`orthonormal_axes`), so a template offset in centimetres becomes metres
+    in the world rather than being multiplied by the object's scale.
     """
-    right = (camera_matrix[0][0], camera_matrix[1][0], camera_matrix[2][0])
-    up = (camera_matrix[0][1], camera_matrix[1][1], camera_matrix[2][1])
-    back = (camera_matrix[0][2], camera_matrix[1][2], camera_matrix[2][2])
+    right, up, back = orthonormal_axes(camera_matrix)
     return (right, up, vec_scale(back, -1.0))
 
 
@@ -1008,10 +1052,17 @@ class MotionTemplateGenerator:
 
 
 def matrix_to_quaternion(matrix: Sequence[Sequence[float]]) -> Quat:
-    """Robust 3x3 rotation -> quaternion for a 4x4 (or 3x3) row-major matrix."""
-    m00, m01, m02 = matrix[0][0], matrix[0][1], matrix[0][2]
-    m10, m11, m12 = matrix[1][0], matrix[1][1], matrix[1][2]
-    m20, m21, m22 = matrix[2][0], matrix[2][1], matrix[2][2]
+    """Robust 3x3 rotation -> quaternion for a 4x4 (or 3x3) row-major matrix.
+
+    The rotation is taken from an orthonormalised copy of the matrix: a camera with
+    a scale (the reference scene has one at 0.542, i.e. ``0.542 * R``) made the
+    trace-based formula below return an orientation **24.7 deg** off the truth,
+    which pointed generated camera moves away from the camera's own view axis.
+    """
+    x, y, z = orthonormal_axes(matrix)
+    m00, m10, m20 = x
+    m01, m11, m21 = y
+    m02, m12, m22 = z
     trace = m00 + m11 + m22
     if trace > 0.0:
         s = math.sqrt(trace + 1.0) * 2.0

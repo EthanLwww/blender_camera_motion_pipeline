@@ -515,7 +515,10 @@ class BatchSection:
     scene_name_mode: str = "stem"
     overwrite: bool = False
     resume: bool = True
-    save_sequence_blend: bool = True
+    #: Sequences always store the camera animation, never a copy of the scene: the
+    #: renderer replays the payload onto the scene shipped beside it.  There is no
+    #: switch any more -- a config file that still sets ``save_sequence_blend`` gets
+    #: an "unknown key" warning.
     save_validation_report: bool = True
     verbose: bool = True
     character_asset_root: str = ""
@@ -544,7 +547,6 @@ class BatchSection:
             scene_name_mode=_read_choice(raw, "scene_name_mode", cls.SCENE_NAME_MODES, "stem", warnings),
             overwrite=_read_typed(raw, "overwrite", bool, False, warnings),
             resume=_read_typed(raw, "resume", bool, True, warnings),
-            save_sequence_blend=_read_typed(raw, "save_sequence_blend", bool, True, warnings),
             save_validation_report=_read_typed(raw, "save_validation_report", bool, True, warnings),
             verbose=_read_typed(raw, "verbose", bool, True, warnings),
             character_asset_root=_read_typed(raw, "character_asset_root", str, "", warnings),

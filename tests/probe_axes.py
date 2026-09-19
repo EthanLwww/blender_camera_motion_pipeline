@@ -26,6 +26,8 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _boot  # noqa: E402,F401  (the add-on folder may be called anything)
 
 from blender_motion_pipeline.camera import motion_templates as mt  # noqa: E402
 from test_motion_templates import _look_neg_y  # noqa: E402
