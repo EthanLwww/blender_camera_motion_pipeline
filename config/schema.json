@@ -145,6 +145,54 @@
     "composite": {
       "type": "object",
       "additionalProperties": false,
+      "description": "Spatio-temporal compound shots: the video is split into segments and every segment plays one or more atomic camera moves at the same time (only moves that drive different axes).",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "template_path": { "type": "string", "description": "Atomic motion document; empty means the bundled templates/atomic_motion_templates.json" },
+        "max_simultaneous": { "type": "integer", "minimum": 1, "maximum": 5, "description": "How many atomic moves may run at the same moment." },
+        "max_segments": { "type": "integer", "minimum": 1, "description": "How many segments a video may have; the 0.5 s minimum segment length caps it." },
+        "sequences_per_camera": { "type": "integer", "minimum": 1, "maximum": 500, "description": "How many compound sequences one camera gets; character/animation variants are spread over them instead of multiplying the count." },
+        "random": { "type": "boolean", "description": "true: the two counts above are maxima of per-sequence draws; false: they are fixed values." },
+        "seed": { "type": "integer" },
+        "output_mode": { "type": "string", "enum": ["with_base", "only_compound", "only_base"] },
+        "duration_mode": { "type": "string", "enum": ["fixed", "random"] },
+        "duration": { "type": "number", "minimum": 0.5, "description": "Video length in seconds when duration_mode is fixed." },
+        "duration_min": { "type": "number", "minimum": 0.5 },
+        "duration_max": { "type": "number", "minimum": 0.5 }
+      }
+    },
+    "render": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "engine": { "type": "string" },
+        "samples": { "type": "integer", "minimum": 1 },
+        "resolution_x": { "type": "integer", "minimum": 1 },
+        "resolution_y": { "type": "integer", "minimum": 1 },
+        "resolution_percentage": { "type": "integer", "minimum": 1, "maximum": 100 },
+        "fps": { "type": "number", "exclusiveMinimum": 0 },
+        "video_format": { "type": "string", "enum": ["mp4", "mkv", "webm", "avi"] },
+        "codec": { "type": "string" },
+        "constant_rate_factor": { "type": "string" },
+        "input_root": { "type": "string" },
+        "output_root": { "type": "string" },
+        "recursive": { "type": "boolean" },
+        "overwrite": { "type": "boolean" },
+        "skip_existing": { "type": "boolean" },
+        "dry_run": { "type": "boolean" },
+        "workers": { "type": "integer", "minimum": 1 },
+        "trajectory_mode": { "type": "string", "enum": ["all_frames", "sampled"] },
+        "trajectory_step": { "type": "integer", "minimum": 1 },
+        "keep_frames": { "type": "boolean" },
+        "scene_filter": { "type": "array", "items": { "type": "string" } },
+        "motion_filter": { "type": "array", "items": { "type": "string" } },
+        "sequence_filter": { "type": "array", "items": { "type": "string" } },
+        "log_level": { "type": "string", "enum": ["DEBUG", "INFO", "WARNING", "ERROR"] }
+      }
+    },
+    "composite": {
+      "type": "object",
+      "additionalProperties": false,
       "description": "Compound shots: several base templates played one after another inside one sequence, keeping the same total frame range.",
       "properties": {
         "enabled": { "type": "boolean" },

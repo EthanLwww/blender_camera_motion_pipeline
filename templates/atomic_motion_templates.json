@@ -1,0 +1,1984 @@
+{
+  "schema_version": 1,
+  "name": "atomic camera motions",
+  "unit_scale": {
+    "fps": 24,
+    "rotation_order": "XYZ"
+  },
+  "coordinate_system": "camera-local: location [right, up, back] metres, rotation [rx, ry, rz] degrees about the camera's own axes; every entry is a one-second ramp, so its delta is a rate per second",
+  "channels": {
+    "yaw": "rotation about the camera's own up axis (ry)",
+    "pitch": "rotation about the camera's own right axis (rx)",
+    "roll": "rotation about the camera's own view axis (rz)",
+    "lateral": "translation along the camera's own right axis (x)",
+    "vertical": "translation along the camera's own up axis (y)",
+    "depth": "translation along the camera's own view axis (z)",
+    "focal": "focal length (mm)"
+  },
+  "templates": [
+    {
+      "id": "pan_left_slow",
+      "type": "Pan",
+      "direction": "left",
+      "speed": "slow",
+      "channels": [
+        "yaw"
+      ],
+      "description": "Pan left at slow speed: 8 deg/s",
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 24,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            8.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "pan_left_medium",
+      "type": "Pan",
+      "direction": "left",
+      "speed": "medium",
+      "channels": [
+        "yaw"
+      ],
+      "description": "Pan left at medium speed: 18 deg/s",
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 24,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            18.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "pan_left_fast",
+      "type": "Pan",
+      "direction": "left",
+      "speed": "fast",
+      "channels": [
+        "yaw"
+      ],
+      "description": "Pan left at fast speed: 40 deg/s",
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 24,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            40.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "pan_right_slow",
+      "type": "Pan",
+      "direction": "right",
+      "speed": "slow",
+      "channels": [
+        "yaw"
+      ],
+      "description": "Pan right at slow speed: 8 deg/s",
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 24,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            -8.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "pan_right_medium",
+      "type": "Pan",
+      "direction": "right",
+      "speed": "medium",
+      "channels": [
+        "yaw"
+      ],
+      "description": "Pan right at medium speed: 18 deg/s",
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 24,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            -18.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "pan_right_fast",
+      "type": "Pan",
+      "direction": "right",
+      "speed": "fast",
+      "channels": [
+        "yaw"
+      ],
+      "description": "Pan right at fast speed: 40 deg/s",
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 24,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            -40.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "tilt_up_slow",
+      "type": "Tilt",
+      "direction": "up",
+      "speed": "slow",
+      "channels": [
+        "pitch"
+      ],
+      "description": "Tilt up at slow speed: 5 deg/s",
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 24,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            5.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "tilt_up_medium",
+      "type": "Tilt",
+      "direction": "up",
+      "speed": "medium",
+      "channels": [
+        "pitch"
+      ],
+      "description": "Tilt up at medium speed: 12 deg/s",
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 24,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            12.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "tilt_up_fast",
+      "type": "Tilt",
+      "direction": "up",
+      "speed": "fast",
+      "channels": [
+        "pitch"
+      ],
+      "description": "Tilt up at fast speed: 26 deg/s",
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 24,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            26.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "tilt_down_slow",
+      "type": "Tilt",
+      "direction": "down",
+      "speed": "slow",
+      "channels": [
+        "pitch"
+      ],
+      "description": "Tilt down at slow speed: 5 deg/s",
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 24,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            -5.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "tilt_down_medium",
+      "type": "Tilt",
+      "direction": "down",
+      "speed": "medium",
+      "channels": [
+        "pitch"
+      ],
+      "description": "Tilt down at medium speed: 12 deg/s",
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 24,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            -12.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "tilt_down_fast",
+      "type": "Tilt",
+      "direction": "down",
+      "speed": "fast",
+      "channels": [
+        "pitch"
+      ],
+      "description": "Tilt down at fast speed: 26 deg/s",
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 24,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            -26.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "roll_clockwise_slow",
+      "type": "Roll",
+      "direction": "clockwise",
+      "speed": "slow",
+      "channels": [
+        "roll"
+      ],
+      "description": "Roll clockwise at slow speed: 4 deg/s",
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 24,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            -4.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "roll_clockwise_medium",
+      "type": "Roll",
+      "direction": "clockwise",
+      "speed": "medium",
+      "channels": [
+        "roll"
+      ],
+      "description": "Roll clockwise at medium speed: 10 deg/s",
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 24,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            -10.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "roll_clockwise_fast",
+      "type": "Roll",
+      "direction": "clockwise",
+      "speed": "fast",
+      "channels": [
+        "roll"
+      ],
+      "description": "Roll clockwise at fast speed: 22 deg/s",
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 24,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            -22.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "roll_counterclockwise_slow",
+      "type": "Roll",
+      "direction": "counterclockwise",
+      "speed": "slow",
+      "channels": [
+        "roll"
+      ],
+      "description": "Roll counterclockwise at slow speed: 4 deg/s",
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 24,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            4.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "roll_counterclockwise_medium",
+      "type": "Roll",
+      "direction": "counterclockwise",
+      "speed": "medium",
+      "channels": [
+        "roll"
+      ],
+      "description": "Roll counterclockwise at medium speed: 10 deg/s",
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 24,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            10.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "roll_counterclockwise_fast",
+      "type": "Roll",
+      "direction": "counterclockwise",
+      "speed": "fast",
+      "channels": [
+        "roll"
+      ],
+      "description": "Roll counterclockwise at fast speed: 22 deg/s",
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 24,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            22.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "truck_left_slow",
+      "type": "Truck",
+      "direction": "left",
+      "speed": "slow",
+      "channels": [
+        "lateral"
+      ],
+      "description": "Truck left at slow speed: 0.25 m/s",
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 24,
+          "location": [
+            -0.25,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "truck_left_medium",
+      "type": "Truck",
+      "direction": "left",
+      "speed": "medium",
+      "channels": [
+        "lateral"
+      ],
+      "description": "Truck left at medium speed: 0.6 m/s",
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 24,
+          "location": [
+            -0.6,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "truck_left_fast",
+      "type": "Truck",
+      "direction": "left",
+      "speed": "fast",
+      "channels": [
+        "lateral"
+      ],
+      "description": "Truck left at fast speed: 1.3 m/s",
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 24,
+          "location": [
+            -1.3,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "truck_right_slow",
+      "type": "Truck",
+      "direction": "right",
+      "speed": "slow",
+      "channels": [
+        "lateral"
+      ],
+      "description": "Truck right at slow speed: 0.25 m/s",
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 24,
+          "location": [
+            0.25,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "truck_right_medium",
+      "type": "Truck",
+      "direction": "right",
+      "speed": "medium",
+      "channels": [
+        "lateral"
+      ],
+      "description": "Truck right at medium speed: 0.6 m/s",
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 24,
+          "location": [
+            0.6,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "truck_right_fast",
+      "type": "Truck",
+      "direction": "right",
+      "speed": "fast",
+      "channels": [
+        "lateral"
+      ],
+      "description": "Truck right at fast speed: 1.3 m/s",
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 24,
+          "location": [
+            1.3,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "dolly_in_slow",
+      "type": "Dolly In",
+      "direction": null,
+      "speed": "slow",
+      "channels": [
+        "depth"
+      ],
+      "description": "Dolly In at slow speed: 0.3 m/s",
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 24,
+          "location": [
+            0.0,
+            0.0,
+            -0.3
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "dolly_in_medium",
+      "type": "Dolly In",
+      "direction": null,
+      "speed": "medium",
+      "channels": [
+        "depth"
+      ],
+      "description": "Dolly In at medium speed: 0.7 m/s",
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 24,
+          "location": [
+            0.0,
+            0.0,
+            -0.7
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "dolly_in_fast",
+      "type": "Dolly In",
+      "direction": null,
+      "speed": "fast",
+      "channels": [
+        "depth"
+      ],
+      "description": "Dolly In at fast speed: 1.5 m/s",
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 24,
+          "location": [
+            0.0,
+            0.0,
+            -1.5
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "dolly_out_slow",
+      "type": "Dolly Out",
+      "direction": null,
+      "speed": "slow",
+      "channels": [
+        "depth"
+      ],
+      "description": "Dolly Out at slow speed: 0.3 m/s",
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 24,
+          "location": [
+            0.0,
+            0.0,
+            0.3
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "dolly_out_medium",
+      "type": "Dolly Out",
+      "direction": null,
+      "speed": "medium",
+      "channels": [
+        "depth"
+      ],
+      "description": "Dolly Out at medium speed: 0.7 m/s",
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 24,
+          "location": [
+            0.0,
+            0.0,
+            0.7
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "dolly_out_fast",
+      "type": "Dolly Out",
+      "direction": null,
+      "speed": "fast",
+      "channels": [
+        "depth"
+      ],
+      "description": "Dolly Out at fast speed: 1.5 m/s",
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 24,
+          "location": [
+            0.0,
+            0.0,
+            1.5
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "pedestal_up_slow",
+      "type": "Pedestal",
+      "direction": "up",
+      "speed": "slow",
+      "channels": [
+        "vertical"
+      ],
+      "description": "Pedestal up at slow speed: 0.15 m/s",
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 24,
+          "location": [
+            0.0,
+            0.15,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "pedestal_up_medium",
+      "type": "Pedestal",
+      "direction": "up",
+      "speed": "medium",
+      "channels": [
+        "vertical"
+      ],
+      "description": "Pedestal up at medium speed: 0.35 m/s",
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 24,
+          "location": [
+            0.0,
+            0.35,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "pedestal_up_fast",
+      "type": "Pedestal",
+      "direction": "up",
+      "speed": "fast",
+      "channels": [
+        "vertical"
+      ],
+      "description": "Pedestal up at fast speed: 0.75 m/s",
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 24,
+          "location": [
+            0.0,
+            0.75,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "pedestal_down_slow",
+      "type": "Pedestal",
+      "direction": "down",
+      "speed": "slow",
+      "channels": [
+        "vertical"
+      ],
+      "description": "Pedestal down at slow speed: 0.15 m/s",
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 24,
+          "location": [
+            0.0,
+            -0.15,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "pedestal_down_medium",
+      "type": "Pedestal",
+      "direction": "down",
+      "speed": "medium",
+      "channels": [
+        "vertical"
+      ],
+      "description": "Pedestal down at medium speed: 0.35 m/s",
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 24,
+          "location": [
+            0.0,
+            -0.35,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "pedestal_down_fast",
+      "type": "Pedestal",
+      "direction": "down",
+      "speed": "fast",
+      "channels": [
+        "vertical"
+      ],
+      "description": "Pedestal down at fast speed: 0.75 m/s",
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 24,
+          "location": [
+            0.0,
+            -0.75,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "arc_clockwise_slow",
+      "type": "Arc",
+      "direction": "clockwise",
+      "speed": "slow",
+      "channels": [
+        "lateral",
+        "yaw"
+      ],
+      "description": "Arc clockwise at slow speed: 0.25 deg/s with a yaw that keeps a subject ~4 m away centred",
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 24,
+          "location": [
+            0.25,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            3.580986,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "arc_clockwise_medium",
+      "type": "Arc",
+      "direction": "clockwise",
+      "speed": "medium",
+      "channels": [
+        "lateral",
+        "yaw"
+      ],
+      "description": "Arc clockwise at medium speed: 0.6 deg/s with a yaw that keeps a subject ~4 m away centred",
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 24,
+          "location": [
+            0.6,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            8.594367,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "arc_clockwise_fast",
+      "type": "Arc",
+      "direction": "clockwise",
+      "speed": "fast",
+      "channels": [
+        "lateral",
+        "yaw"
+      ],
+      "description": "Arc clockwise at fast speed: 1.3 deg/s with a yaw that keeps a subject ~4 m away centred",
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 24,
+          "location": [
+            1.3,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            18.621128,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "arc_counterclockwise_slow",
+      "type": "Arc",
+      "direction": "counterclockwise",
+      "speed": "slow",
+      "channels": [
+        "lateral",
+        "yaw"
+      ],
+      "description": "Arc counterclockwise at slow speed: 0.25 deg/s with a yaw that keeps a subject ~4 m away centred",
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 24,
+          "location": [
+            -0.25,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            -3.580986,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "arc_counterclockwise_medium",
+      "type": "Arc",
+      "direction": "counterclockwise",
+      "speed": "medium",
+      "channels": [
+        "lateral",
+        "yaw"
+      ],
+      "description": "Arc counterclockwise at medium speed: 0.6 deg/s with a yaw that keeps a subject ~4 m away centred",
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 24,
+          "location": [
+            -0.6,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            -8.594367,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "arc_counterclockwise_fast",
+      "type": "Arc",
+      "direction": "counterclockwise",
+      "speed": "fast",
+      "channels": [
+        "lateral",
+        "yaw"
+      ],
+      "description": "Arc counterclockwise at fast speed: 1.3 deg/s with a yaw that keeps a subject ~4 m away centred",
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 24,
+          "location": [
+            -1.3,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            -18.621128,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "zoom_in_slow",
+      "type": "Zoom In",
+      "direction": null,
+      "speed": "slow",
+      "channels": [
+        "focal"
+      ],
+      "description": "Zoom In at slow speed: 4 mm/s",
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 24,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 39.0
+        }
+      ]
+    },
+    {
+      "id": "zoom_in_medium",
+      "type": "Zoom In",
+      "direction": null,
+      "speed": "medium",
+      "channels": [
+        "focal"
+      ],
+      "description": "Zoom In at medium speed: 10 mm/s",
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 24,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 45.0
+        }
+      ]
+    },
+    {
+      "id": "zoom_in_fast",
+      "type": "Zoom In",
+      "direction": null,
+      "speed": "fast",
+      "channels": [
+        "focal"
+      ],
+      "description": "Zoom In at fast speed: 22 mm/s",
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 24,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 57.0
+        }
+      ]
+    },
+    {
+      "id": "zoom_out_slow",
+      "type": "Zoom Out",
+      "direction": null,
+      "speed": "slow",
+      "channels": [
+        "focal"
+      ],
+      "description": "Zoom Out at slow speed: 4 mm/s",
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 24,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 31.0
+        }
+      ]
+    },
+    {
+      "id": "zoom_out_medium",
+      "type": "Zoom Out",
+      "direction": null,
+      "speed": "medium",
+      "channels": [
+        "focal"
+      ],
+      "description": "Zoom Out at medium speed: 10 mm/s",
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 24,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 25.0
+        }
+      ]
+    },
+    {
+      "id": "zoom_out_fast",
+      "type": "Zoom Out",
+      "direction": null,
+      "speed": "fast",
+      "channels": [
+        "focal"
+      ],
+      "description": "Zoom Out at fast speed: 22 mm/s",
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 24,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 13.0
+        }
+      ]
+    },
+    {
+      "id": "static",
+      "type": "Static",
+      "direction": null,
+      "speed": null,
+      "channels": [],
+      "description": "Hold the camera still (a segment with no motion).",
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 24,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    }
+  ]
+}

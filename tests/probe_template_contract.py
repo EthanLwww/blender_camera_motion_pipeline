@@ -175,53 +175,171 @@ def check_sequence(samples, template, *, tolerance: float = TRANSLATION_TOLERANC
     return problems
 
 
-def check_compound(samples, config, library, *, tolerance: float = TRANSLATION_TOLERANCE) -> "list[str]":
-    """Check a compound sequence: same frame range, contiguous windows, chained parts.
+def rebuild_plan(config):
+    """Rebuild the :class:`MotionPlan` a sequence recorded, or ``None``.
 
-    The parts themselves are checked against their own numbers by the single-template
-    rules above; a compound's own contract is that it keeps the total frame range and
-    that each part starts where the previous one ended.
+    Spatio-temporal sequences carry their plan in ``sequence_config.json``
+    (``motion_plan``): the segments, the atoms that ran in each one and the frame
+    range.  Rebuilding it lets this probe check the recorded camera motion against
+    the plan's own numbers without opening a scene.
     """
-    name = str((config.get("sequence") or {}).get("motion_name") or "")
-    block = ((config.get("motion") or {}).get("parameters") or {}).get("compound") or {}
+    from blender_motion_pipeline.camera import motion_composite as mc
+
+    block = config.get("motion_plan")
+    if not isinstance(block, dict) or not block.get("segments"):
+        return None
+    atoms, _source = mc.load_atomic_library(
+        template_path=str(block.get("template_source") or ""),
+        fps=float(block.get("fps") or 24.0),
+    )
+    by_name = {atom.name: atom for atom in atoms}
+    segments = []
+    for raw in block["segments"]:
+        motions = tuple(by_name[name] for name in (raw.get("motions") or [])
+                        if name in by_name)
+        segments.append(mc.PlanSegment(
+            index=int(raw.get("index", len(segments))),
+            start_time=float(raw["start_time"]),
+            end_time=float(raw["end_time"]),
+            start_frame=int(raw["start_frame"]),
+            end_frame=int(raw["end_frame"]),
+            motions=motions,
+        ))
+    return mc.MotionPlan(
+        duration_seconds=float(block.get("duration_seconds") or 0.0),
+        fps=float(block.get("fps") or 24.0),
+        frame_start=int(block.get("frame_start") or 0),
+        frame_end=int(block.get("frame_end") or 0),
+        segments=tuple(segments),
+        compound=bool(block.get("compound", True)),
+        seed=int(block.get("seed") or 0),
+        source=str(block.get("template_source") or ""),
+    )
+
+
+def check_plan(samples, config, *, tolerance: float = TRANSLATION_TOLERANCE) -> "list[str]":
+    """Check a planned sequence (single atom or compound) against its own plan.
+
+    The plan is flattened again here and compared with the recorded poses frame by
+    frame: the displacement must be the atoms' rates integrated over the segments,
+    expressed in the camera's starting orientation, and the rotation must be the
+    camera-local composition the generator used.
+    """
+    from blender_motion_pipeline.camera import motion_composite as mc
+
+    name = str((config.get("sequence") or {}).get("motion_name") or "?")
+    plan = rebuild_plan(config)
+    if plan is None:
+        return [f"{name}: no motion plan recorded"]
     problems: "list[str]" = []
-    parts = [str(part) for part in (block.get("parts") or [])]
-    windows = [[int(v) for v in window] for window in (block.get("windows") or [])]
-    if not parts or not windows:
-        return [f"{name}: a compound sequence without its recipe"]
-    if len(parts) != len(windows):
-        problems.append(f"{name}: {len(parts)} parts but {len(windows)} window(s)")
-    for part in parts:
-        try:
-            library.get(part)
-        except Exception:
-            problems.append(f"{name}: part {part!r} is not in the template document")
-    for (start, end), (next_start, _next_end) in zip(windows, windows[1:]):
-        if next_start != end + 1:
-            problems.append(f"{name}: windows are not contiguous ({windows})")
+    if not samples:
+        return [f"{name}: no samples"]
+
+    # -- the time plan itself --------------------------------------------
     frames = config.get("frames") or {}
-    if windows and frames.get("frame_start") is not None:
-        if (int(frames["frame_start"]) != windows[0][0]
-                or int(frames["frame_end"]) != windows[-1][1]):
+    if frames.get("frame_start") is not None:
+        if (int(frames["frame_start"]) != plan.frame_start
+                or int(frames["frame_end"]) != plan.frame_end):
             problems.append(
                 f"{name}: the sequence covers {frames.get('frame_start')}.."
-                f"{frames.get('frame_end')} but its windows cover "
-                f"{windows[0][0]}..{windows[-1][1]}"
+                f"{frames.get('frame_end')} but its plan covers "
+                f"{plan.frame_start}..{plan.frame_end}"
             )
-    if frames.get("frame_count") is not None and len(samples) != int(frames["frame_count"]):
+    if len(samples) != plan.frame_count:
         problems.append(
-            f"{name}: {len(samples)} sample(s) for frame_count {frames['frame_count']}"
+            f"{name}: {len(samples)} sample(s) for a {plan.frame_count}-frame plan"
         )
-    # A broken chain leaves a cut-sized step at a junction.
-    for index, ((_start, end), window) in enumerate(zip(windows, windows[1:])):
-        junction = [s for s in samples if int(s["frame"]) in (end, window[0])]
-        if len(junction) == 2:
-            step = math.dist(junction[0]["location"], junction[1]["location"])
-            if step > 1.0:
-                problems.append(
-                    f"{name}: {step:.2f} m jump between part {index + 1} and {index + 2} "
-                    "(the parts are not chained)"
-                )
+    for segment in plan.segments:
+        if segment.duration_seconds < mc.MIN_SEGMENT_SECONDS - 1e-9:
+            problems.append(
+                f"{name}: segment {segment.index} lasts {segment.duration_seconds:.3f} s "
+                f"(below the {mc.MIN_SEGMENT_SECONDS:g} s minimum)"
+            )
+    for previous, following in zip(plan.segments, plan.segments[1:]):
+        if abs(previous.end_time - following.start_time) > 1e-6:
+            problems.append(f"{name}: segments are not contiguous in time")
+        if following.start_frame != previous.end_frame + 1:
+            problems.append(f"{name}: segments do not touch in frames")
+    for segment in plan.segments:
+        channels: "list[str]" = []
+        for motion in segment.motions:
+            channels.extend(motion.channels)
+        if len(channels) != len(set(channels)):
+            problems.append(
+                f"{name}: segment {segment.index} runs two moves on the same axis "
+                f"({[m.name for m in segment.motions]})"
+            )
+
+    # -- the motion the plan implies --------------------------------------
+    # The plan is flattened again and pushed through the very generator that made
+    # the sequence, from the base pose the recording implies: the expected poses must
+    # then equal the recorded ones sample for sample.  Re-using the generator (rather
+    # than re-deriving the camera basis here) keeps this check free of its own
+    # handedness/orthonormalisation assumptions.
+    #
+    # A zoom plan records the focal it *reached*, not the base lens, so recover the
+    # base from the plan's own frame-0 ramp: otherwise the rebuilt plan would sit on
+    # the wrong lens and every zoomed frame would look like a mismatch.
+    base_focal = float(samples[0].get("focal_length") or 35.0)
+    if plan.segments and abs(plan.segments[0].start_time) < 1e-9:
+        base_focal -= sum(
+            motion.rate_focal for motion in plan.segments[0].motions
+        ) / max(plan.fps, 1e-6)
+    template = mc.flatten_plan(plan, base_focal=base_focal)
+    generator = mt.MotionTemplateGenerator()
+    first_key = template.keyframes[0]
+    start_quaternion = tuple(float(v) for v in samples[0]["rotation_quaternion"])
+    # The generator composes as ``q_base * delta`` (the template turns the camera in
+    # its *own* frame), so the frame-0 delta is cancelled on the **right**:
+    # quaternions do not commute, and left-cancelling leaves the camera rotated by
+    # the frame-0 tap (measured: 0.93 deg, which then grew into a ~1 % path error).
+    anchor = mt.quat_normalize(mt.quat_multiply(
+        start_quaternion,
+        mt.quat_conjugate(generator.rotation_delta(first_key.rotation or (0.0, 0.0, 0.0))),
+    ))
+    base_axes = mt.orthonormal_axes(mt.quaternion_to_matrix(anchor))
+    origin = tuple(
+        float(samples[0]["location"][axis])
+        - sum(base_axes[column][axis] * float(first_key.location[column])
+              for column in range(3))
+        for axis in range(3)
+    )
+    base_matrix = [list(row) + [origin[index]] for index, row in enumerate(mt.quaternion_to_matrix(anchor))]
+    base_matrix.append([0.0, 0.0, 0.0, 1.0])
+    expected = generator.generate(
+        template, base_matrix=base_matrix, base_focal=base_focal,
+        frame_start=plan.frame_start, frame_end=plan.frame_end,
+    )
+    worst_position = 0.0
+    worst_rotation = 0.0
+    for sample, wanted_sample in zip(samples, expected.samples):
+        worst_position = max(
+            worst_position, math.dist(sample["location"], wanted_sample.position)
+        )
+        worst_rotation = max(worst_rotation, mt.quat_angle_between(
+            sample["rotation_quaternion"], wanted_sample.quaternion
+        ))
+        if abs(float(sample.get("focal_length") or 0.0) - float(wanted_sample.focal)) > 1e-3:
+            problems.append(
+                f"{name}: frame {sample['frame']} zoomed to {sample.get('focal_length')} mm "
+                f"but the plan asks for {wanted_sample.focal:.4f} mm"
+            )
+            break
+    if len(expected.samples) != len(samples):
+        problems.append(
+            f"{name}: the plan produces {len(expected.samples)} frame(s), the sequence "
+            f"has {len(samples)}"
+        )
+    if worst_position > tolerance:
+        problems.append(
+            f"{name}: the recorded path is {worst_position:.4f} m away from the plan "
+            f"(tolerance {tolerance:g} m)"
+        )
+    if worst_rotation > ROTATION_TOLERANCE:
+        problems.append(
+            f"{name}: the recorded aim is {worst_rotation:.3f} deg away from the plan "
+            f"(tolerance {ROTATION_TOLERANCE:g} deg)"
+        )
     return problems
 
 
@@ -259,11 +377,15 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
 
     document = args.templates or recorded_document(args.sequence_root)
-    if not document or not os.path.isfile(document):
-        print(f"cannot find the template document ({document or 'not recorded'})")
-        return 2
-    library = mt.load_template_file(document)
-    print(f"templates : {document} ({len(library)})")
+    library = None
+    if document and os.path.isfile(document):
+        library = mt.load_template_file(document)
+        print(f"templates : {document} ({len(library)})")
+    else:
+        # A plan-driven tree (single atoms / compounds) carries everything it needs
+        # in its own sequence_config.json, so a template document is optional there.
+        print(f"templates : none ({document or 'not recorded'}) -- plan-driven trees are "
+              f"self-describing")
     print(f"tree      : {args.sequence_root}")
 
     checked = 0
@@ -274,14 +396,20 @@ def main(argv=None) -> int:
     for _directory, config, sidecar in iter_sequences(args.sequence_root):
         name = str((config.get("sequence") or {}).get("motion_name") or "")
         samples = ((sidecar.get("motion") or {}).get("samples")) or []
-        block = ((config.get("motion") or {}).get("parameters") or {}).get("compound")
-        if isinstance(block, dict):
-            # A compound is checked against its recipe, and its parts are checked
-            # against their own numbers by the same run on a base sequence.
-            problems.extend(check_compound(samples, config, library,
-                                            tolerance=args.tolerance))
-            compound_count += 1
-            families["compound"] = families.get("compound", 0) + 1
+        if config.get("motion_plan"):
+            # Spatio-temporal sequence (one atom or a compound): check it against
+            # the plan it recorded, which needs no template document at all.
+            problems.extend(check_plan(samples, config, tolerance=args.tolerance))
+            if bool((config.get("motion_plan") or {}).get("compound")):
+                compound_count += 1
+                families["compound"] = families.get("compound", 0) + 1
+            else:
+                checked += 1
+                family = name.split("_")[0]
+                families[family] = families.get(family, 0) + 1
+            continue
+        if library is None:
+            skipped.append(name)
             continue
         try:
             template = library.get(name)
@@ -299,7 +427,7 @@ def main(argv=None) -> int:
 
     for family in sorted(families):
         print(f"  {family:14s} {families[family]:3d} sequence(s)")
-    print(f"checked   : {checked} base sequence(s)"
+    print(f"checked   : {checked} single-move sequence(s)"
           + (f" + {compound_count} compound(s)" if compound_count else ""))
     if skipped:
         print(f"not in the document: {sorted(set(skipped))[:5]}")
@@ -308,7 +436,7 @@ def main(argv=None) -> int:
         for problem in problems[:20]:
             print(f"  ! {problem}")
         return 1
-    print("verdict   : every sequence matches its template's Blender numbers")
+    print("verdict   : every sequence matches the numbers it was generated from")
     return 0
 
 

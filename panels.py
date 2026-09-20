@@ -468,21 +468,29 @@ class MPP_PT_output(_MPPPanel, Panel):
         layout.prop(group, "camera_selection")
 
         # -- compound shots ----------------------------------------------
-        # The master switch lives here; switching it on reveals the sub-panel the
-        # compound configuration needs (type, counts, and what gets written).
+        # The master switch lives in *Sequence output*; switching it on reveals the
+        # sub-panel the spatio-temporal compound needs (how many moves at once, how
+        # many segments, whether those counts are random, and the video length).
         box = layout.box()
         box.prop(group, "compound_enabled", text="Enable compound shots")
         if group.compound_enabled:
             column = box.column(align=True)
-            column.prop(group, "compound_mode")
-            if group.compound_mode == "partial":
-                sub = column.column(align=True)
-                row = sub.row(align=True)
-                row.prop(group, "compound_types")
-                row.prop(group, "compound_count")
-                row = sub.row(align=True)
-                row.prop(group, "compound_seed")
+            row = column.row(align=True)
+            row.prop(group, "compound_max_simultaneous")
+            row.prop(group, "compound_max_segments")
+            column.prop(group, "compound_per_camera")
+            column.prop(group, "compound_random")
+            row = column.row(align=True)
+            row.prop(group, "compound_duration_mode", text="")
+            if group.compound_duration_mode == "random":
+                row.prop(group, "compound_duration_min")
+                row.prop(group, "compound_duration_max")
+            else:
+                row.prop(group, "compound_duration")
             column.prop(group, "compound_output")
+            column.prop(group, "compound_template_path")
+            row = column.row(align=True)
+            row.prop(group, "compound_seed")
             icon = "INFO" if group.compound_ok() else "ERROR"
             for line in group.composite_summary().splitlines():
                 box.label(text=line, icon=icon)

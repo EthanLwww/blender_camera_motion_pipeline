@@ -232,6 +232,12 @@ def build_render_metadata(
             "motion_template": (sequence_config.get("motion") or {}).get("template_name", ""),
             "validation": sequence_config.get("validation", {}),
         }
+        # The shot report travels with the video: one entry per segment, naming the
+        # atomic moves that were running and how fast.
+        plan = sequence_config.get("motion_plan")
+        if isinstance(plan, dict):
+            payload["motion_plan"] = plan
+            payload["shot_report"] = plan.get("shot_report")
     payload.update(generator_stamp())
     if extra:
         payload.update(extra)

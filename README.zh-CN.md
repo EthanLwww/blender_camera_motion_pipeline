@@ -406,68 +406,70 @@ local_basis = inverse(matrix_parent_inverse) @ inverse(parent_world) @ world_pos
 
 ---
 
-## 复合运镜（Compound shots）
+## 复合运镜（时空复合）
 
-**复合镜头**把多个基础模板依次放进**同一条序列、且总帧数与单个模板完全一致**（参考集是 0..80 帧）。帧区间按份数切成若干窗口，每段被压缩进自己的窗口，并且**每一段都从上一段结束时的位姿接着走**——所以 `pan_right + hitchcock` 就是先向右摇、紧接着前推，没有剪切点，也不会变长。
+一条复合镜头是在**空间与时间**上同时编排的：视频被切成若干 **分段**，每一段内可以**同时**执行多个**原子运镜**。两个原子运镜能否同时出现，取决于它们是否驱动同一个**轴（channel）**：
 
-```
-pan_right_01_standard + hitchcock_01_base_forward_standard + truck_right_01_standard
-帧 0..80（81 个采样，与单个模板相同）
-  [1] 帧  0..26   pan_right  ：转 30.00°，位移 0.000 m
-  [2] 帧 27..53   hitchcock  ：前推 3.400 m，转 0.00°   （衔接处跳变：0.00 mm）
-  [3] 帧 54..80   truck_right：横移 3.000 m，转 0.00°   （衔接处跳变：0.00 mm）
-```
-
-实现方式是把一条配方**展平成一个普通模板**：它的关键帧是锚点坐标系下已经串接好的位姿。因此校验、相机自动搜索、烘焙、元数据、渲染器都把它当普通模板处理——轨迹的连续性和单镜头一样（上例最大逐帧位移 131 mm）。
-
-### 配置（面板 **Sequence output**）
-
-1. 勾选 **Enable compound shots** 后展开副配置栏。
-2. **Compound type（复合类型）**
-   * **Full compound（全量复合）**：全部已加载模板的**所有顺序**，即 ``n!`` 条序列。
-   * **Partial compound（部分复合）**：*Templates per sequence* 为 ``x``（2..10），*Sequence count* 为 ``N``：生成 ``N`` 条互不重复的序列，每条**恰好**由已加载的 ``n`` 个模板中的 ``x`` 个组成，从 ``x! * C(n, x)`` 种有序组合中按 *Random seed* 抽取（同种子重跑得到同一批，便于续跑）。
-3. **Compound output（复合镜头序列输出方式）**：**With base shots**（复合镜头与非复合镜头一起生成）、**Compound shots only**（只生成复合镜头）、**Base shots only**（忽略复合配置，只生成非复合镜头）。
-
-副配置栏会在开始前把数量写清楚（如 `Full compound: 6 sequence(s) = 3!`），并且对不可能完成的配置**拒绝启动并给出建议**：
-
-* ``n!`` 受 ``composite.max_full_sequences`` 限制（默认 5040 = 7!）。对 80 个模板做全量复合是 80!，没人渲染得完——请用 **Motion filter** 缩小模板集（例如 3 个模板 → 6 条复合），或改用部分复合。
-* 部分复合要求每条序列 2..10 个不同模板，不能超过存在的组合数 ``x! * C(n, x)``，并受 ``composite.max_partial_sequences``（100000）限制。
-
-### 产物
-
-| | |
+| channel | 驱动什么 |
 |---|---|
-| 文件夹 | 每个组合一个 ``scene/compound_<部分>+<部分>[...]``（过长时用哈希截断） |
-| 帧 | 与单个模板完全一致：``frame_start``、``frame_end``、``frame_count`` 都相同 |
-| ``sequence_config.json`` | ``motion.parameters.compound`` = ``{parts, windows, range, index}`` |
-| 其余 | 与普通序列完全相同：同样的产物、同样的渲染器、同样的轨迹 JSON/TXT |
+| `yaw` | 绕相机自身上轴的旋转（`ry`）—— Pan，以及 Arc 的旋转部分 |
+| `pitch` | 绕相机自身右轴的旋转（`rx`）—— Tilt |
+| `roll` | 绕相机视线轴的旋转（`rz`）—— Roll |
+| `lateral` | 沿相机自身右轴平移（`x`）—— Truck，以及 Arc 的横移部分 |
+| `vertical` | 沿相机自身上轴平移（`y`）—— Pedestal |
+| `depth` | 沿相机视线平移（`z`）—— Dolly In/Out |
+| `focal` | 焦距（mm）—— Zoom In/Out |
 
-### CLI 与配置
+所以 `Pan right + Tilt down + Truck left` 是合法的三运镜分段，而 `Zoom In + Zoom Out`、`Pedestal up + Pedestal down` 会被拒绝（同一轴）；`Arc` 自己就驱动 lateral+yaw 两个轴，因此不能与 Pan / Truck 同时出现。
 
-```bash
-# 3 个模板的全量复合，与非复合镜头一起生成
-blender -b -P motion_pipeline_cli.py -- \
-    --scenes "D:\scenes\room001.blend" --output-root "D:\projects" \
-    --motion-filter "pan_right_01_standard" --motion-filter "hitchcock_01_base_forward_standard" \
-    --motion-filter "truck_right_01_standard" \
-    --compound --compound-mode full --compound-output with_base
+### 原子运镜模板
 
-# 12 条可复现的 4 模板复合，只生成复合镜头
-blender -b -P motion_pipeline_cli.py -- \
-    --config batch.json --compound --compound-mode partial \
-    --compound-types 4 --compound-count 12 --compound-seed 7 --compound-output only_compound
-```
+`templates/atomic_motion_templates.json` 共 49 条：Pan（左/右）、Tilt（上/下）、Roll（顺/逆时针）、Truck（左/右）、Dolly In/Out、Pedestal（上/下）、Arc（顺/逆时针）、Zoom In/Out——**每种都有 slow / medium / fast 三档**——加一条 `static`。可用 `python tests/make_atomic_templates.py` 重新生成；每条都是普通模板，关键帧是**1 秒的斜坡**，因此它的增量就是“每秒速率”：
+
+| 原子 | slow | medium | fast |
+|---|---|---|---|
+| Pan | 8 °/s | 18 °/s | 40 °/s |
+| Tilt | 5 | 12 | 26 |
+| Roll | 4 | 10 | 22 |
+| Truck | 0.25 m/s | 0.6 m/s | 1.3 m/s |
+| Dolly | 0.3 | 0.7 | 1.5 |
+| Pedestal | 0.15 | 0.35 | 0.75 |
+| Arc | 0.25 m/s 横移 + `v/4 m` rad/s 偏航 | 0.6 | 1.3 |
+| Zoom | 4 mm/s | 10 mm/s | 22 mm/s |
+
+因为是速率，分段**时长**只影响运动走多远，不影响看起来的快慢：“Pan left, medium”在 0.5 s 和 6 s 的分段里都是 18 °/s。像 `hitchcock`、`fixed` 这类“整个镜头”故意不在词汇表里——复合镜头是用原子搭出来的。
+
+### 配置（面板：*Sequence output* → *Compound shots*）
+
+| 设置 | 含义 |
+|---|---|
+| **Max moves at once** | 同一时刻最多同时出现几种运镜（1-5） |
+| **Max segments** | 一条视频最多分几段；每段至少 **0.5 s**，因此短视频会自动压低上限 |
+| **Sequences per camera** | **单台相机**输出多少条复合序列（`sequences_per_camera`）。人物/动画变体**不会**乘上去，而是分摊到这些序列上：4 个变体、总量设 2，仍然只产出 2 条 |
+| **Random counts** | 开：上面两项是每条序列随机取值的**上限**；关：每段固定那么多种、整条固定那么多段。选哪些运镜与速度始终随机（由 **Random seed** 可复现） |
+| **Video length** | `Fixed`（每条都是这个时长）或 `Random range`（每条在 Min/Max 之间自己抽）；帧范围 = 时长 × fps |
+| **Compound output** | 与单运镜镜头一起生成 / 只生成复合 / 只生成单运镜 |
+| **Atomic templates** | 词汇表文档；留空则用自带的 |
+
+CLI 同样对应：`--compound-simultaneous`、`--compound-segments`、`--compound-random/--no-compound-random`、`--compound-templates`、`--duration`、`--duration-mode`、`--duration-min/--duration-max`、`--compound-output`、`--compound-seed`。`--dry-run` 会在生成前打印分段上限、时长范围与一个示例计划。
+
+### 产出什么
+
+每台相机一条序列，放在很短的 `combo/` 目录下。除通常的 sidecar 与轨迹文件外，还会写出**镜头报告**（`<sequence>_motion_plan.json`），渲染器会把同一份文件复制到视频旁边：
 
 ```json
-"composite": {
-  "enabled": true, "mode": "partial",
-  "types_per_sequence": 4, "sequence_count": 12, "seed": 7,
-  "output_mode": "with_base",
-  "max_full_sequences": 5040, "max_partial_sequences": 100000
-}
+[
+  {"start_time": 0.0, "end_time": 1.0,
+   "basic_movement": [{"type": "Tilt", "direction": "up", "speed": "fast"}]},
+  {"start_time": 1.0, "end_time": 2.0,
+   "basic_movement": [{"type": "Truck", "direction": "right", "speed": "slow"},
+                      {"type": "Pedestal", "direction": "down", "speed": "medium"},
+                      {"type": "Roll", "direction": "counterclockwise", "speed": "slow"}]}
+]
 ```
 
-``--dry-run`` 会在写盘前列出复合镜头的名字与最终序列数量；``tests/probe_template_contract.py`` 也认识复合镜头：它会检查帧区间、窗口是否首尾相接，以及衔接处是否出现"剪切级"跳变（会报告 "the parts are not chained"）。
+时间是 `1/fps` 的整数倍，因此报告与视频完全对齐；各段首尾相接且覆盖整条视频。完整计划（分段、帧范围、原子速率、种子）同时记在序列 JSON 的 `extra.motion_plan` 里；`tests/probe_template_contract.py` 会把每份计划重新展平并逐帧对比实际轨迹——纯计划树不需要任何模板文档。
+
 
 ---
 
@@ -534,10 +536,10 @@ penalty = w_distance   · offset / 10 m
 ## 测试
 
 ```bash
-# 全量（纯 Python 套件 + Blender 套件）—— 232 个用例
+# 全量（纯 Python 套件 + Blender 套件）—— 241 个用例
 blender -b -P blender_camera_motion_pipeline/tests/run_blender_tests.py
 
-# 只跑纯套件，不需要 Blender —— 136 个用例
+# 只跑纯套件，不需要 Blender —— 144 个用例
 python blender_camera_motion_pipeline/tests/run_blender_tests.py
 
 # 单个套件也能独立运行
@@ -572,13 +574,13 @@ python blender_camera_motion_pipeline/tests/probe_template_contract.py -- \
 | `test_config` | 18 | 通过 |
 | `test_project_layout` | 15 | 通过 |
 | `test_motion_templates` | 33 | 通过 |
-| `test_motion_composite` | 15 | 通过 |
+| `test_motion_composite` | 23 | 通过 |
 | `test_camera_validation` | 39 | 通过 |
 | `test_animation_api` | 10 | 通过 |
 | `test_addon_lifecycle` | 10 | 通过 |
 | `test_render_workflow` | 18 | 通过 |
-| `test_blender_integration` | 58 | 通过 |
-| **合计** | **232** | **通过** |
+| `test_blender_integration` | 59 | 通过 |
+| **合计** | **241** | **通过** |
 
 `tests/static_check.py` 另外检查全包无未使用 import、无遗留调试标记；其中一个集成用例用桩 layout 驱动**每个面板的 `draw()`**，避免"面板读了已不存在的属性、直到用户打开侧栏才崩"。
 

@@ -107,13 +107,17 @@
   },
   "composite": {
     "enabled": false,
-    "mode": "partial",
-    "types_per_sequence": 2,
-    "sequence_count": 12,
+    "template_path": "",
+    "max_simultaneous": 3,
+    "max_segments": 4,
+    "random": true,
     "seed": 1234,
     "output_mode": "with_base",
-    "max_full_sequences": 5040,
-    "max_partial_sequences": 100000
+    "duration_mode": "fixed",
+    "duration": 4.0,
+    "duration_min": 2.0,
+    "duration_max": 6.0,
+    "sequences_per_camera": 2
   },
   "scenes": [
     {

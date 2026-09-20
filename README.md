@@ -885,91 +885,95 @@ selects a subset by id or glob.
 
 ---
 
-## Compound shots
+## Compound shots (spatio-temporal)
 
-A **compound shot** plays several base templates one after another inside
-**one sequence, with the same total frame range as a single template** — 0..80 frames
-for the reference set. The range is split into one window per part, each part is
-compressed into its own window, and each part starts where the previous one ended, so
-`pan_right + hitchcock` pans right over the first windows and then pushes in, without a
-cut and without getting any longer.
+A compound shot is planned in **space and time**: the video is split into
+**segments**, and each segment plays one or more *atomic* camera moves **at the
+same moment**.  Two atoms may share a moment only when they drive different axes:
 
-```
-pan_right_01_standard + hitchcock_01_base_forward_standard + truck_right_01_standard
-frames 0..80 (81 samples, same as one template)
-  [1] frames  0..26   pan_right : turns 30.00 deg, moves 0.000 m
-  [2] frames 27..53   hitchcock : pushes 3.400 m,   turns 0.00 deg   (junction: 0.00 mm)
-  [3] frames 54..80   truck_right: strafes 3.000 m, turns 0.00 deg   (junction: 0.00 mm)
-```
+| channel | what it drives |
+|---|---|
+| `yaw` | rotation about the camera's own up axis (`ry`) — Pan, and the yaw half of Arc |
+| `pitch` | rotation about the camera's own right axis (`rx`) — Tilt |
+| `roll` | rotation about the camera's own view axis (`rz`) — Roll |
+| `lateral` | translation along the camera's own right axis (`x`) — Truck, and the track half of Arc |
+| `vertical` | translation along the camera's own up axis (`y`) — Pedestal |
+| `depth` | translation along the camera's own view axis (`z`) — Dolly In/Out |
+| `focal` | focal length (mm) — Zoom In/Out |
 
-A compound is **flattened into one ordinary template** whose keys are the chained
-poses in the anchor frame, so validation, the camera search, the bake, the metadata
-and the renderer treat it exactly like any other template — and its trajectory is as
-continuous as a single shot's (largest per-frame move in the example: 131 mm).
+So `Pan right + Tilt down + Truck left` is a legal three-move segment, while
+`Zoom In + Zoom Out` or `Pedestal up + Pedestal down` is refused (they fight over
+one axis), and an `Arc` cannot be combined with a Pan or a Truck because it drives
+both of those axes itself.
 
-### Configuring it (panel: **Sequence output**)
+### The atomic vocabulary
 
-1. **Enable compound shots** reveals the sub-panel.
-2. **Compound type**
-   * **Full compound** — every ordering of every loaded template: ``n!`` sequences.
-   * **Partial compound** — *Templates per sequence* ``x`` (2..10) and *Sequence
-     count* ``N``: ``N`` distinct sequences, each holding exactly ``x`` of the ``n``
-     loaded templates, drawn from the ``x! * C(n, x)`` possible orderings with
-     *Random seed* (so a re-run reproduces the same set).
-3. **Compound output** — **With base shots** (compounds *and* the single-template
-   sequences), **Compound shots only**, or **Base shots only** (the compound
-   configuration is ignored).
+`templates/atomic_motion_templates.json` holds 49 entries: Pan (left/right), Tilt
+(up/down), Roll (clockwise/counterclockwise), Truck (left/right), Dolly In/Out,
+Pedestal (up/down), Arc (clockwise/counterclockwise) and Zoom In/Out — **each in
+slow / medium / fast** — plus `static`.  Regenerate it with
+`python tests/make_atomic_templates.py`; every entry is an ordinary template whose
+keys are a **one-second ramp**, so its delta *is* the rate per second:
 
-The sub-panel also states the exact counts before anything runs (`Full compound: 6
-sequence(s) = 3!`), and refuses an impossible configuration with advice instead of
-starting it:
+| atom | slow | medium | fast |
+|---|---|---|---|
+| Pan | 8 deg/s | 18 deg/s | 40 deg/s |
+| Tilt | 5 | 12 | 26 |
+| Roll | 4 | 10 | 22 |
+| Truck | 0.25 m/s | 0.6 m/s | 1.3 m/s |
+| Dolly | 0.3 | 0.7 | 1.5 |
+| Pedestal | 0.15 | 0.35 | 0.75 |
+| Arc | 0.25 m/s lateral + `v/4 m` rad/s yaw | 0.6 | 1.3 |
+| Zoom | 4 mm/s | 10 mm/s | 22 mm/s |
 
-* ``n!`` is capped by ``composite.max_full_sequences`` (5040 = 7! by default). A full
-  compound of the 80-template reference set is 80! — nobody can render that, so
-  narrow the template set with the **Motion filter** (e.g. 3 templates → 6 compounds)
-  or switch to a partial compound.
-* A partial compound needs at least 2 and at most 10 distinct templates per sequence,
-  cannot ask for more orderings than exist (``x! * C(n, x)``), and is capped by
-  ``composite.max_partial_sequences`` (100000).
+Because the atoms are rates, a segment's *length* changes how far a move travels,
+not how fast it looks: "Pan left, medium" is 18 deg/s whether the segment lasts
+0.5 s or 6 s.  Shot-specific families (``hitchcock``, ``fixed``, the numbered
+variants) are deliberately absent — a compound builds those out of atoms instead.
+
+### The settings (panel: *Sequence output* → *Compound shots*)
+
+| Setting | Meaning |
+|---|---|
+| **Max moves at once** | 1-5 atoms may share a moment (`max_simultaneous`) |
+| **Max segments** | how many segments a video may have (`max_segments`); every segment lasts at least **0.5 s**, which caps this for short videos |
+| **Sequences per camera** | how many compound sequences **one camera** gets (`sequences_per_camera`).  Character/animation variants do **not** multiply it -- they are spread over the sequences, so four variants with a total of two still yields two compounds |
+| **Random counts** | on: the two settings above are the *maxima* of per-sequence draws; off: every segment holds exactly that many moves and the video exactly that many segments.  Which atoms and speeds are drawn stays random either way, seeded through **Random seed** |
+| **Video length** | `Fixed` (one length for every sequence) or `Random range` (`Min/Max seconds`, each sequence draws its own).  The frame range follows: `duration x fps` |
+| **Compound output** | compounds together with the single-move shots, compounds only, or single moves only |
+| **Atomic templates** | the vocabulary document; empty means the bundled one |
+
+The CLI mirrors all of it: `--compound-simultaneous`, `--compound-segments`,
+`--compound-random/--no-compound-random`, `--compound-templates`, `--duration`,
+`--duration-mode`, `--duration-min/--duration-max`, `--compound-output`, plus
+`--compound-seed`.  `--dry-run` prints the layout (segment cap, duration range and
+an example plan) before anything is generated.
 
 ### What a compound produces
 
-| | |
-|---|---|
-| Folder | one ``scene/compound_<part>+<part>[...]`` per combination (shortened with a hash when it would be unwieldy) |
-| Frames | identical to a single template: same ``frame_start``, ``frame_end`` and ``frame_count`` |
-| ``sequence_config.json`` | ``motion.parameters.compound`` = ``{parts, windows, range, index}`` |
-| Everything else | exactly like any other sequence: same artifacts, same renderer, same trajectory JSON/TXT |
-
-### CLI and config
-
-```bash
-# every ordering of a 3-template subset, next to the base shots
-blender -b -P motion_pipeline_cli.py -- \
-    --scenes "D:\scenes\room001.blend" --output-root "D:\projects" \
-    --motion-filter "pan_right_01_standard" --motion-filter "hitchcock_01_base_forward_standard" \
-    --motion-filter "truck_right_01_standard" \
-    --compound --compound-mode full --compound-output with_base
-
-# 12 random-but-reproducible 4-template compounds, compounds only
-blender -b -P motion_pipeline_cli.py -- \
-    --config batch.json --compound --compound-mode partial \
-    --compound-types 4 --compound-count 12 --compound-seed 7 --compound-output only_compound
-```
+One sequence per camera, in the short ``combo/`` folder.  Alongside the usual
+sidecar and trajectory it writes the **shot report**
+(``<sequence>_motion_plan.json``), and the renderer re-emits the same file next to
+the rendered video:
 
 ```json
-"composite": {
-  "enabled": true, "mode": "partial",
-  "types_per_sequence": 4, "sequence_count": 12, "seed": 7,
-  "output_mode": "with_base",
-  "max_full_sequences": 5040, "max_partial_sequences": 100000
-}
+[
+  {"start_time": 0.0, "end_time": 1.0,
+   "basic_movement": [{"type": "Tilt", "direction": "up", "speed": "fast"}]},
+  {"start_time": 1.0, "end_time": 2.0,
+   "basic_movement": [{"type": "Truck", "direction": "right", "speed": "slow"},
+                      {"type": "Pedestal", "direction": "down", "speed": "medium"},
+                      {"type": "Roll", "direction": "counterclockwise", "speed": "slow"}]}
+]
 ```
 
-``--dry-run`` lists the compound names and the effective sequence count before
-anything is written, and ``tests/probe_template_contract.py`` understands compounds:
-it checks each one's frame range, windows and junctions (a cut-sized step between two
-parts is reported as "the parts are not chained").
+Times are frame-exact multiples of `1/fps`, so the report and the video agree;
+segments are contiguous and cover the whole video.  The full plan (segment list,
+frame ranges, atom rates, seed) is also recorded in the sequence JSON's
+``extra.motion_plan``, and `tests/probe_template_contract.py` re-flattens each plan
+and compares it with the recorded poses frame by frame -- a plan-driven tree needs
+no template document at all.
+
 
 ---
 
@@ -1105,10 +1109,10 @@ not been produced from real MetaHuman or Blender rigs here.** See
 ## Testing
 
 ```bash
-# Everything (pure suites + Blender suites) — 232 cases
+# Everything (pure suites + Blender suites) — 241 cases
 blender -b -P blender_camera_motion_pipeline/tests/run_blender_tests.py
 
-# Pure suites only, no Blender required (136 cases)
+# Pure suites only, no Blender required (144 cases)
 python blender_camera_motion_pipeline/tests/run_blender_tests.py
 
 # Individual suites (each one also runs on its own)
@@ -1174,13 +1178,13 @@ tracebacks.
 | `test_config` | 18 | pass |
 | `test_project_layout` | 15 | pass |
 | `test_motion_templates` | 33 | pass |
-| `test_motion_composite` | 15 | pass |
+| `test_motion_composite` | 23 | pass |
 | `test_camera_validation` | 39 | pass |
 | `test_animation_api` | 10 | pass |
 | `test_addon_lifecycle` | 10 | pass |
 | `test_render_workflow` | 18 | pass |
-| `test_blender_integration` | 58 | pass |
-| **Total** | **232** | **pass** |
+| `test_blender_integration` | 59 | pass |
+| **Total** | **241** | **pass** |
 
 `tests/static_check.py` also reports no unused imports or leftover debug markers
 across every Python file in the package, and one integration case drives every

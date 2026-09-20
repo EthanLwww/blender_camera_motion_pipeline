@@ -61,6 +61,7 @@ BLEND_DIR = os.path.join(WORK, "scenes")
 OUT_DIR = os.path.join(WORK, "out")
 RENDER_DIR = os.path.join(WORK, "render")
 TEMPLATE_PATH = os.path.join(WORK, "templates.json")
+ATOMIC_TEMPLATE_PATH = os.path.join(WORK, "atomic_templates.json")
 
 #: A tiny, self-contained template document.  Deliberately not the 80-entry
 #: reference file so the tests stay fast and independent of the artist's copy.
@@ -205,6 +206,69 @@ def build_scene_blend(path: str, *, cameras: int = 1, blocker: bool = False,
 def write_templates() -> str:
     save_json_file(TEMPLATE_PATH, TEMPLATES)
     return TEMPLATE_PATH
+
+
+def _atom(atom_id: str, kind: str, direction, speed, channels, *,
+          location=(0.0, 0.0, 0.0), rotation=(0.0, 0.0, 0.0), focal: float = 35.0) -> dict:
+    """One atomic move, authored as a one-second ramp like the bundled document."""
+    return {
+        "id": atom_id,
+        "type": kind,
+        "direction": direction,
+        "speed": speed,
+        "channels": list(channels),
+        "description": f"{kind} at {speed} speed",
+        "keys": [
+            {"frame": 0, "location": [0.0, 0.0, 0.0], "rotation": [0.0, 0.0, 0.0],
+             "focal": 35.0},
+            {"frame": 24, "location": list(location), "rotation": list(rotation),
+             "focal": focal},
+        ],
+    }
+
+
+#: A four-atom vocabulary covering one channel each (yaw / pitch / lateral / focal),
+#: plus static.  Deliberately tiny: the bundled document has 49 entries.
+ATOMIC_TEMPLATES = [
+    _atom("pan_left_medium", "Pan", "left", "medium", ("yaw",), rotation=(0.0, 18.0, 0.0)),
+    _atom("tilt_down_medium", "Tilt", "down", "medium", ("pitch",), rotation=(-12.0, 0.0, 0.0)),
+    _atom("truck_right_slow", "Truck", "right", "slow", ("lateral",),
+          location=(0.25, 0.0, 0.0)),
+    _atom("zoom_in_fast", "Zoom In", None, "fast", ("focal",), focal=57.0),
+    {
+        "id": "static", "type": "Static", "direction": None, "speed": None,
+        "channels": [], "description": "hold still",
+        "keys": [
+            {"frame": 0, "location": [0.0, 0.0, 0.0], "rotation": [0.0, 0.0, 0.0],
+             "focal": 35.0},
+            {"frame": 24, "location": [0.0, 0.0, 0.0], "rotation": [0.0, 0.0, 0.0],
+             "focal": 35.0},
+        ],
+    },
+]
+
+
+def fingerprint_of(plan) -> str:
+    """A stable summary of a plan, for comparing two draws."""
+    return "|".join(
+        f"{segment.start_frame}-{segment.end_frame}:"
+        + ",".join(motion.name for motion in segment.motions)
+        for segment in plan.segments
+    )
+
+
+def _compound_only(config):
+    """A copy of *config* that writes compounds only (same seed, same camera)."""
+    import copy as _copy
+
+    clone = _copy.deepcopy(config)
+    clone.composite.output_mode = "only_compound"
+    return clone
+
+
+def write_atomic_templates() -> str:
+    save_json_file(ATOMIC_TEMPLATE_PATH, ATOMIC_TEMPLATES)
+    return ATOMIC_TEMPLATE_PATH
 
 
 def make_config(output_root: str, *, templates: str = "", names=None,
@@ -766,86 +830,136 @@ def build_suite() -> Suite:
         ok(any("moved" in problem for problem in detected),
            f"a 5 cm drift must be reported, got {detected}")
 
-    @suite.case("compound shots concatenate templates inside the same frame range")
+    @suite.case("spatio-temporal compounds combine moves and record a shot report")
     def _():
         import math
 
         from blender_motion_pipeline.camera.motion_templates import quat_angle_between
         from blender_motion_pipeline.core.batch_runner import BatchRunner
+        from blender_motion_pipeline.tests import probe_template_contract as contract
 
-        root = os.path.join(OUT_DIR, "compound")
-        names = ["still", "push_in", "pan_swing"]
-        config = make_config(root, names=names)
+        root = os.path.join(OUT_DIR, "compound_st")
+        config = make_config(root, names=["still", "push_in"])
         config.composite.enabled = True
-        config.composite.mode = "full"
+        config.composite.template_path = write_atomic_templates()
+        config.composite.max_simultaneous = 3
+        config.composite.max_segments = 3
+        config.composite.random = False          # fixed counts: 3 segments x 3 moves
+        config.composite.duration_mode = "fixed"
+        config.composite.duration = 3.0
+        config.validation.enabled = False        # kinematics, not framing, is under test
         report = BatchRunner(config, output_root=root,
                              scene_entries=[SceneEntry(path=state["single"])]).run()
         ok(report.ok, report.summary_text())
-        equal(report.generated, 3 + 6, "three base shots plus 3! compounds")
+        # 4 moving atoms + static as single-move shots, plus one compound.
+        equal(report.generated, 6, report.summary_text())
 
         tree = os.path.join(root, "single")
         folders = sorted(name for name in os.listdir(tree)
                          if os.path.isdir(os.path.join(tree, name)))
-        compounds = [name for name in folders if name.startswith("compound_")]
-        equal(len(compounds), 6, folders)
-        equal([name for name in folders if not name.startswith("compound_")], sorted(names))
+        equal("combo" in folders, True, folders)
+        equal(sorted(name for name in folders if name != "combo"),
+              ["pan_left_medium", "static", "tilt_down_medium", "truck_right_slow",
+               "zoom_in_fast"])
 
-        base_frames = load_json_file(os.path.join(tree, "still", "sequence_000001",
-                                                  "sequence_config.json"))["frames"]
-        for name in compounds:
-            folder = os.path.join(tree, name, "sequence_000001")
-            recorded = load_json_file(os.path.join(folder, "sequence_config.json"))
-            for key in ("frame_start", "frame_end", "frame_count"):
-                equal(recorded["frames"][key], base_frames[key],
-                      f"{name}: a compound must keep the single-template frame range")
-            block = recorded["motion"]["parameters"]["compound"]
-            equal(block["parts"], name[len("compound_"):].split("+"),
-                  "the folder name lists the parts in order")
-            equal(block["windows"][0][0], base_frames["frame_start"])
-            equal(block["windows"][-1][1], base_frames["frame_end"])
-            equal(len(block["windows"]), 3)
+        # -- the compound ---------------------------------------------------
+        folder = os.path.join(tree, "combo", "sequence_000001")
+        recorded = load_json_file(os.path.join(folder, "sequence_config.json"))
+        plan = recorded["motion_plan"]
+        equal(plan["compound"], True)
+        equal(plan["segment_count"], 3, "fixed counts: exactly max_segments segments")
+        equal(plan["max_simultaneous"], 3)
+        equal(plan["frame_count"], int(round(3.0 * recorded["frames"]["fps"])))
+        equal(recorded["frames"]["frame_start"], 0)
+        equal(recorded["frames"]["frame_end"], plan["frame_end"])
+        # Every segment runs three moves on three different axes, and no segment is
+        # shorter than the 0.5 s floor.
+        from blender_motion_pipeline.camera import motion_composite as mc
 
-        # The parts must be *chained*: each one starts where the previous ended, so
-        # there is no cut-sized step at a junction (a broken chain shows up as the
-        # full length of a part -- 0.8 m here -- or the whole 30 deg turn).
-        sidecar = load_json_file(os.path.join(tree, compounds[0], "sequence_000001",
-                                              "sequence_000001.json"))
+        atoms, _source = mc.load_atomic_library(template_path=config.composite.template_path)
+        by_name = {atom.name: atom for atom in atoms}
+        for segment in plan["segments"]:
+            equal(len(segment["motions"]), 3, segment)
+            channels: "list[str]" = []
+            for name in segment["motions"]:
+                channels.extend(by_name[name].channels)
+            equal(len(channels), len(set(channels)),
+                  f"segment {segment['index']} reuses an axis: {segment['motions']}")
+            seconds = segment["end_time"] - segment["start_time"]
+            ok(seconds >= mc.MIN_SEGMENT_SECONDS - 1e-9, f"{seconds} s segment")
+
+        # -- the shot report, exactly the shape a dataset consumer expects ---
+        report_path = os.path.join(folder, "sequence_000001_motion_plan.json")
+        ok(os.path.isfile(report_path), report_path)
+        shot = load_json_file(report_path)
+        equal(len(shot), 3)
+        close(shot[0]["start_time"], 0.0, tol=1e-9)
+        for entry in shot:
+            for key in ("start_time", "end_time", "basic_movement"):
+                ok(key in entry, entry)
+            for movement in entry["basic_movement"]:
+                equal(sorted(movement), ["direction", "speed", "type"])
+        equal(shot[0]["basic_movement"][0]["speed"] in ("slow", "medium", "fast"), True)
+        # The file itself must carry the documented field order, not a sorted one.
+        with open(report_path, encoding="utf-8") as handle:
+            raw = handle.read()
+        ok(raw.index('"start_time"') < raw.index('"end_time"') < raw.index('"basic_movement"'),
+           raw[:200])
+        ok(raw.index('"type"') < raw.index('"direction"') < raw.index('"speed"'), raw[:200])
+        # Times are frame-exact, so the report and the video agree.
+        close(shot[-1]["end_time"], plan["frame_count"] / recorded["frames"]["fps"],
+              tol=1e-6)
+
+        # -- the recorded path follows the plan ------------------------------
+        sidecar = load_json_file(os.path.join(folder, "sequence_000001.json"))
         samples = sidecar["motion"]["samples"]
-        worst_move = max(math.dist(a["location"], b["location"])
-                         for a, b in zip(samples, samples[1:]))
-        worst_turn = max(quat_angle_between(a["rotation_quaternion"], b["rotation_quaternion"])
-                         for a, b in zip(samples, samples[1:]))
-        ok(worst_move < 0.6, f"a compound must move smoothly through its junctions ({worst_move})")
-        ok(worst_turn < 20.0, f"a compound must turn smoothly through its junctions ({worst_turn})")
-        # ... and it really does both parts: the pan turns, the push travels.
-        equal(len(samples), base_frames["frame_count"])
+        equal(len(samples), plan["frame_count"])
+        problems = contract.check_plan(samples, recorded)
+        equal(problems, [], "the recorded path must match the plan")
+        # ... and it really does move and turn.
         moved = math.dist(samples[0]["location"], samples[-1]["location"])
         turned = quat_angle_between(samples[0]["rotation_quaternion"],
                                     samples[-1]["rotation_quaternion"])
-        ok(turned > 20.0, f"the pan part must turn the camera, got {turned}")
-        ok(moved > 0.2, f"the push part must move the camera, got {moved}")
+        ok(moved > 0.05, f"the compound must move the camera, got {moved}")
+        ok(turned > 5.0, f"the compound must turn the camera, got {turned}")
+        # A drift must be caught.
+        drifted = [dict(sample) for sample in samples]
+        drifted[-1]["location"] = [drifted[-1]["location"][0] + 0.05,
+                                   drifted[-1]["location"][1],
+                                   drifted[-1]["location"][2]]
+        detected = contract.check_plan(drifted, recorded)
+        ok(any("away from the plan" in problem for problem in detected),
+           f"a 5 cm drift must be reported, got {detected}")
+
+        # -- a single-move shot is a plan too --------------------------------
+        single_folder = os.path.join(tree, "pan_left_medium", "sequence_000001")
+        single = load_json_file(os.path.join(single_folder, "sequence_config.json"))
+        equal(single["motion_plan"]["compound"], False)
+        equal(single["motion_plan"]["segment_count"], 1)
+        equal(len(single["motion_plan"]["segments"][0]["motions"]), 1)
+        single_shot = load_json_file(os.path.join(
+            single_folder, "sequence_000001_motion_plan.json"))
+        equal(single_shot[0]["basic_movement"],
+              [{"type": "Pan", "direction": "left", "speed": "medium"}])
 
     @suite.case("the compound output mode decides what gets written")
     def _():
-        from blender_motion_pipeline.camera.motion_templates import MotionTemplateLibrary
         from blender_motion_pipeline.core.batch_runner import BatchRunner
-        from blender_motion_pipeline.core.sequence_generator import (
-            SequenceGenerator,
-            compound_parts,
-        )
 
-        names = ["still", "push_in"]
         expected = {
-            "with_base": (2 + 2, True, True),
-            "only_compound": (2, False, True),
-            "only_base": (2, True, False),
+            "with_base": (6, True, True),
+            "only_compound": (1, False, True),
+            "only_base": (5, True, False),
         }
         for mode, (count, want_base, want_compound) in expected.items():
             root = os.path.join(OUT_DIR, f"compound_mode_{mode}")
-            config = make_config(root, names=names)
+            config = make_config(root, names=["still"])
             config.composite.enabled = True
-            config.composite.mode = "full"
+            config.composite.template_path = write_atomic_templates()
             config.composite.output_mode = mode
+            config.composite.max_segments = 2
+            config.composite.duration = 2.0
+            config.validation.enabled = False
             report = BatchRunner(config, output_root=root,
                                  scene_entries=[SceneEntry(path=state["single"])]).run()
             ok(report.ok, report.summary_text())
@@ -853,43 +967,114 @@ def build_suite() -> Suite:
             tree = os.path.join(root, "single")
             folders = sorted(name for name in os.listdir(tree)
                              if os.path.isdir(os.path.join(tree, name)))
-            has_base = any(not name.startswith("compound_") for name in folders)
-            has_compound = any(name.startswith("compound_") for name in folders)
-            equal(has_base, want_base, f"{mode}: base shots present? {folders}")
+            has_base = any(name != "combo" for name in folders)
+            has_compound = "combo" in folders
+            equal(has_base, want_base, f"{mode}: single-move shots present? {folders}")
             equal(has_compound, want_compound, f"{mode}: compounds present? {folders}")
 
-        # The library itself must never be mutated by the compound expansion.
-        library = MotionTemplateLibrary.from_file(write_templates())
-        library.restrict_to(names)  # what the Motion filter does before a run
-        before = len(library)
-        equal(before, len(names))
-        config = make_config(os.path.join(OUT_DIR, "compound_lib"), names=names)
-        config.composite.enabled = True
-        generator = SequenceGenerator(config, output_root=OUT_DIR)
-        requests = generator.build_requests(
-            SceneEntry(path=state["single"]), library=library, cameras=["Camera"],
-            character_variants=[(False, None, None, "")],
-        )
-        equal(len(library), before, "building requests must not add compounds to the library")
-        equal(len(requests), before + 2, "2 base shots plus 2! compounds")
-        compound_requests = [r for r in requests if compound_parts(r.template)]
-        equal(len(compound_requests), 2)
-        ok(all(r.motion_name.startswith("compound_") for r in compound_requests))
+    @suite.case("compounds per camera are a per-camera total, not per variant")
+    def _():
+        from blender_motion_pipeline.camera.motion_templates import MotionTemplateLibrary
+        from blender_motion_pipeline.core.batch_runner import BatchRunner
+        from blender_motion_pipeline.core.sequence_generator import SequenceGenerator
 
-    @suite.case("a full compound of too many templates is refused with advice")
+        # Two cameras, two compounds each, and *four* character/animation variants:
+        # the variants spread over the sequences instead of multiplying them.
+        config = make_config(os.path.join(OUT_DIR, "per_camera"), names=["still"])
+        config.composite.enabled = True
+        config.composite.template_path = write_atomic_templates()
+        config.composite.sequences_per_camera = 2
+        config.composite.max_segments = 2
+        config.composite.duration = 2.0
+        config.validation.enabled = False
+        library = MotionTemplateLibrary.from_config(config.motion)
+        generator = SequenceGenerator(config, output_root=OUT_DIR)
+        variants = [(False, None, None, ""),
+                    (True, None, None, "variant-a"),
+                    (True, None, None, "variant-b"),
+                    (True, None, None, "variant-c")]
+        requests = generator.build_requests(
+            SceneEntry(path=state["single"]), library=library,
+            cameras=["Camera", "Cam02"], character_variants=variants,
+        )
+        compounds = [r for r in requests if r.plan is not None and r.plan.compound]
+        equal(len(compounds), 4, "2 cameras x 2 compounds, whatever the variants")
+        equal(sorted({r.index for r in compounds}), [1, 2, 3, 4],
+              "every compound lives in combo/, so the numbering runs through them")
+        equal(sorted({r.camera_name for r in compounds}), ["Cam02", "Camera"])
+        # The variants are spread, not repeated: the first two variants are used.
+        used = [r.character_note for r in compounds]
+        equal(sorted(set(used)), ["", "variant-a"], used)
+        # The single-move shots still follow the full matrix (4 variants x 5 atoms).
+        singles = [r for r in requests if r.plan is not None and not r.plan.compound]
+        equal(len(singles), 5 * 4 * 2, "single-move shots keep the classic matrix")
+
+        # The plans are independent random draws: N per camera are N different
+        # shots, and they do not depend on what was queued before them (adding the
+        # single-move shots must not rewrite the compounds).
+        config.composite.sequences_per_camera = 6
+        many = generator.build_requests(
+            SceneEntry(path=state["single"]), library=library,
+            cameras=["Camera"], character_variants=[(False, None, None, "")],
+        )
+        plans = [r.plan for r in many if r.plan is not None and r.plan.compound]
+        equal(len(plans), 6)
+        marks = {
+            "|".join(f"{s.start_frame}-{s.end_frame}:" + ",".join(m.name for m in s.motions)
+                     for s in plan.segments)
+            for plan in plans
+        }
+        equal(len(marks), 6, "six compounds per camera must be six different shots")
+        only_compounds = SequenceGenerator(
+            _compound_only(config), output_root=OUT_DIR
+        ).build_requests(
+            SceneEntry(path=state["single"]), library=library,
+            cameras=["Camera"], character_variants=[(False, None, None, "")],
+        )
+        solo = [r.plan for r in only_compounds if r.plan is not None and r.plan.compound]
+        equal([fingerprint_of(plan) for plan in solo], [fingerprint_of(plan) for plan in plans],
+              "the same camera and slot must give the same plan whether or not the "
+              "single-move shots are generated")
+        config.composite.sequences_per_camera = 2
+
+        # And a real run writes exactly that many compounds.
+        root = os.path.join(OUT_DIR, "per_camera_run")
+        run_config = make_config(root, names=["still"])
+        run_config.composite.enabled = True
+        run_config.composite.template_path = write_atomic_templates()
+        run_config.composite.sequences_per_camera = 3
+        run_config.composite.output_mode = "only_compound"
+        run_config.composite.max_segments = 2
+        run_config.composite.duration = 2.0
+        run_config.validation.enabled = False
+        report = BatchRunner(run_config, output_root=root,
+                             scene_entries=[SceneEntry(path=state["single"])]).run()
+        ok(report.ok, report.summary_text())
+        # The fixture scene has a single camera, so the total is exactly N.
+        equal(report.generated, 3, "three compounds for the one camera in this scene")
+        folders = os.listdir(os.path.join(root, "single"))
+        equal(folders, ["combo"], "only_compound writes the combo folder alone")
+
+    @suite.case("the 0.5 s floor caps how many segments a plan may have")
     def _():
         from blender_motion_pipeline.camera import motion_composite as mc
-        from blender_motion_pipeline.config.models import ConfigError
+        from blender_motion_pipeline.config.models import CompositeSection, ConfigError
 
-        raises(ConfigError, lambda: mc.build_recipes([f"t{i}" for i in range(20)],
-                                                     mode=mc.MODE_FULL))
-        recipes, _warnings = mc.build_recipes(
-            ["a", "b", "c", "d", "e"], mode=mc.MODE_PARTIAL, types_per_sequence=4,
-            sequence_count=7, seed=11,
-        )
-        equal(len(recipes), 7)
-        for recipe in recipes:
-            equal(len(set(recipe.parts)), 4, "a partial compound uses x distinct templates")
+        equal(mc.max_segments_for(4.0, requested=99), 8)
+        equal(mc.max_segments_for(1.2, requested=99), 2)
+        atoms, source = mc.load_atomic_library(template_path=write_atomic_templates())
+        plan = mc.plan_compound(atoms, duration_seconds=4.0, fps=24.0,
+                                max_simultaneous=3, max_segments=99,
+                                randomize=False, rng=__import__("random").Random(3),
+                                seed=3, source=source)
+        equal(len(plan.segments), 8)
+        ok(all(segment.duration_seconds >= 0.5 - 1e-9 for segment in plan.segments),
+           [segment.duration_seconds for segment in plan.segments])
+        ok(any("only fits" in note for note in plan.notes), plan.notes)
+        raises(ConfigError, lambda: mc.plan_compound(
+            [], duration_seconds=2.0, fps=24.0, source=""))
+        raises(ConfigError, lambda: CompositeSection.from_dict(
+            {"max_simultaneous": 6}, []))
 
     @suite.case("a run writes one self-contained project folder")
     def _():
@@ -1870,16 +2055,24 @@ def build_suite() -> Suite:
         try:
             group = bpy.context.scene.mpp
             props = bpy.types.Scene.bl_rna.properties["mpp"].fixed_type.properties
-            for name in ("compound_enabled", "compound_mode", "compound_types",
-                         "compound_count", "compound_seed", "compound_output"):
+            for name in ("compound_enabled", "compound_max_simultaneous",
+                         "compound_max_segments", "compound_random", "compound_seed",
+                         "compound_output", "compound_duration_mode",
+                         "compound_duration", "compound_duration_min",
+                         "compound_duration_max", "compound_template_path"):
                 ok(name in props, f"{name} must be a panel property")
             equal(props["compound_enabled"].type, "BOOLEAN")
-            equal(props["compound_mode"].type, "ENUM")
-            equal(props["compound_types"].type, "INT")
-            equal(props["compound_types"].hard_min, 2, "x starts at 2")
-            equal(props["compound_types"].hard_max, 10, "x stops at 10")
+            equal(props["compound_max_simultaneous"].type, "INT")
+            equal(props["compound_max_simultaneous"].hard_min, 1)
+            equal(props["compound_max_simultaneous"].hard_max, 5,
+                  "the brief caps simultaneous moves at 5")
+            equal(props["compound_max_segments"].hard_min, 1)
+            equal(props["compound_duration"].hard_min, 0.5,
+                  "a sequence cannot be shorter than one segment")
             equal([item.identifier for item in props["compound_output"].enum_items],
                   ["with_base", "only_compound", "only_base"])
+            equal([item.identifier for item in props["compound_duration_mode"].enum_items],
+                  ["fixed", "random"])
 
             # Off by default, and "off" must mean no compound anywhere.
             equal(group.compound_enabled, False)
@@ -1889,32 +2082,51 @@ def build_suite() -> Suite:
 
             # Enabling it round trips through BatchConfig.
             group.compound_enabled = True
-            group.compound_mode = "full"
+            group.compound_max_simultaneous = 4
+            group.compound_max_segments = 3
+            group.compound_random = False
+            group.compound_duration_mode = "random"
+            group.compound_duration_min = 3.0
+            group.compound_duration_max = 5.0
+            group.compound_template_path = r"E:\\tmp\\atomic.json"
             config = group.to_config()
             equal(config.composite.enabled, True)
-            equal(config.composite.mode, "full")
+            equal(config.composite.max_simultaneous, 4)
+            equal(config.composite.max_segments, 3)
+            equal(config.composite.random, False)
+            equal(config.composite.template_path, r"E:\\tmp\\atomic.json")
+            equal(config.composite.effective_duration_range(), (3.0, 5.0))
             group.from_config(config)
-            equal(group.compound_enabled, True)
+            equal(group.compound_max_simultaneous, 4)
+            equal(group.compound_random, False)
+            equal(group.compound_duration_mode, "random")
 
-            # The summary explains the counts before anything is generated.
-            group.motion_count = 3
+            # The summary explains the plan before anything is generated.
             text = group.composite_summary()
-            ok("3!" in text and "6" in text, text)
-            group.compound_mode = "partial"
-            group.compound_types = 2
-            group.compound_count = 5
+            ok("3.00-5.00 s" in text, text)
+            ok("Segments: up to 3" in text, text)      # the configured maximum
+            ok("Moves at once: up to 4 of 5" in text, text)
+            ok("fixed counts" in text, text)
+            equal(group.compound_limits(), (3, 4))
+            # A longer video would allow more segments: 6 s / 0.5 s = 12, capped at 3.
+            group.compound_max_segments = 12
+            equal(group.compound_limits(), (6, 4))     # 3 s (the shortest) / 0.5 s = 6
+
+            # A fixed, short video is capped by the 0.5 s floor and says so.
+            group.compound_duration_mode = "fixed"
+            group.compound_duration = 1.5
+            group.compound_max_segments = 8
             text = group.composite_summary()
-            ok("5 of 6" in text, text)
-            equal(group.compound_counts(), (5, 6))
+            ok("Segments: up to 3" in text, text)
+            ok("capped from 8" in text, text)
+            equal(group.compound_limits(), (3, 4))
 
             # An impossible configuration is reported, not silently started.
-            group.compound_mode = "full"
-            group.motion_count = 20
+            group.compound_duration_mode = "random"
+            group.compound_duration_min = 5.0
+            group.compound_duration_max = 1.0
             ok(not group.compound_ok(), group.composite_summary())
-            ok("limit" in group.composite_summary(), group.composite_summary())
-            group.motion_count = 1
-            ok(not group.compound_ok(), group.composite_summary())
-            ok("at least 2" in group.composite_summary(), group.composite_summary())
+            ok("inverted" in group.composite_summary(), group.composite_summary())
 
             # ... and every control is drawn by the Sequence output panel: the master
             # switch unconditionally, the sub-panel controls only when it is on.
@@ -1924,9 +2136,11 @@ def build_suite() -> Suite:
             ok(separator, "the compound sub-panel must be conditional")
             ok('prop(group, "compound_enabled"' in head,
                "the master switch must be drawn unconditionally")
-            for name in ("compound_mode", "compound_types", "compound_count",
-                         "compound_seed", "compound_output"):
-                ok(f'prop(group, "{name}")' in tail,
+            for name in ("compound_max_simultaneous", "compound_max_segments",
+                         "compound_random", "compound_duration_mode",
+                         "compound_output", "compound_template_path",
+                         "compound_seed"):
+                ok(f'prop(group, "{name}"' in tail,
                    f"{name} must be inside the conditional sub-panel")
         finally:
             registration.unregister_all()

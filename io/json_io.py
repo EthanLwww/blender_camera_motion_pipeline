@@ -40,7 +40,7 @@ def load_json_file(path: str, *, default=None, required: bool = True):
         raise JsonError(f"Cannot read {target}: {exc}") from exc
 
 
-def dump_json_file(path: str, payload, *, indent: int = 2) -> str:
+def dump_json_file(path: str, payload, *, indent: int = 2, sort_keys: bool = True) -> str:
     """Atomically write ``payload`` as UTF-8 JSON.  Returns the written path."""
     target = normalize_path(path)
     if not target:
@@ -48,7 +48,7 @@ def dump_json_file(path: str, payload, *, indent: int = 2) -> str:
     parent = os.path.dirname(target)
     if parent:
         ensure_dir(parent)
-    text = json.dumps(payload, ensure_ascii=False, indent=indent, sort_keys=True)
+    text = json.dumps(payload, ensure_ascii=False, indent=indent, sort_keys=sort_keys)
     # Write to a sibling temp file first so a crash cannot leave a half-written
     # manifest behind (the render farm polls these files).
     handle = tempfile.NamedTemporaryFile(
@@ -66,9 +66,15 @@ def dump_json_file(path: str, payload, *, indent: int = 2) -> str:
     return target
 
 
-def save_json_file(path: str, payload, *, indent: int = 2) -> str:
-    """Alias kept for readability at call sites."""
-    return dump_json_file(path, payload, indent=indent)
+def save_json_file(path: str, payload, *, indent: int = 2, sort_keys: bool = True) -> str:
+    """Alias kept for readability at call sites.
+
+    ``sort_keys`` stays on for the pipeline's own artifacts (stable diffs) and is
+    turned **off** for the shot report, which has a documented field order --
+    ``start_time``, ``end_time``, ``basic_movement``, and inside a movement
+    ``type``, ``direction``, ``speed``.
+    """
+    return dump_json_file(path, payload, indent=indent, sort_keys=sort_keys)
 
 
 def dumps(payload, *, indent: int = 2) -> str:

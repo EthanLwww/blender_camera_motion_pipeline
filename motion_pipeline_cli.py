@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import random
 import sys
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -160,23 +161,46 @@ def build_parser() -> argparse.ArgumentParser:
     render_defaults.add_argument("--resolution", default="", metavar="X:Y")
     render_defaults.add_argument("--video-format", default="", help="mp4 | mkv | webm | avi")
 
-    composite = parser.add_argument_group("compound shots (several templates in one sequence)")
+    composite = parser.add_argument_group(
+        "compound shots (several atomic moves at once, in segments)"
+    )
     composite.add_argument("--compound", action="store_true", default=None,
-                           help="also generate compound sequences (same total frame range)")
+                           help="also generate spatio-temporal compound sequences")
     composite.add_argument("--no-compound", dest="compound", action="store_false", default=None,
-                           help="generate only single-template sequences (default)")
-    composite.add_argument("--compound-mode", default="", choices=["", "full", "partial"],
-                           help="full = every ordering (n!); partial = x templates, N sequences")
-    composite.add_argument("--compound-types", type=int, default=None, metavar="X",
-                           help="partial compound: distinct templates per sequence (2-10)")
-    composite.add_argument("--compound-count", type=int, default=None, metavar="N",
-                           help="partial compound: how many distinct compounds to generate")
+                           help="generate only the single-move sequences (default)")
+    composite.add_argument("--compound-simultaneous", type=int, default=None, metavar="N",
+                           help="how many atomic moves may run at the same moment (1-5)")
+    composite.add_argument("--compound-segments", type=int, default=None, metavar="N",
+                           help="how many segments a compound video may be split into "
+                                "(each segment lasts at least 0.5 s)")
+    composite.add_argument("--compound-per-camera", type=int, default=None, metavar="N",
+                           help="how many compound sequences one camera gets (character/"
+                                "animation variants are spread over them, not multiplied)")
+    composite.add_argument("--compound-random", dest="compound_random", action="store_true",
+                           default=None,
+                           help="the two counts above are maxima of per-sequence draws (default)")
+    composite.add_argument("--no-compound-random", dest="compound_random", action="store_false",
+                           default=None,
+                           help="the two counts above are fixed: every segment holds exactly "
+                                "that many moves and every video exactly that many segments")
+    composite.add_argument("--compound-templates", default="", metavar="PATH",
+                           help="atomic motion document (default: the bundled "
+                                "templates/atomic_motion_templates.json)")
     composite.add_argument("--compound-seed", type=int, default=None,
-                           help="partial compound: seed for the draw (reproducible)")
+                           help="seed for the draws (reproducible)")
     composite.add_argument("--compound-output", default="",
                            choices=["", "with_base", "only_compound", "only_base"],
-                           help="what to write: compounds with the base shots, compounds only, "
-                                "or base shots only")
+                           help="what to write: compounds with the single-move shots, compounds "
+                                "only, or single moves only")
+    composite.add_argument("--duration", type=float, default=None, metavar="SECONDS",
+                           help="video length of every sequence (fixed mode)")
+    composite.add_argument("--duration-mode", default="", choices=["", "fixed", "random"],
+                           help="fixed = one length for every sequence; random = each sequence "
+                                "draws its own length from --duration-min/--duration-max")
+    composite.add_argument("--duration-min", type=float, default=None, metavar="SECONDS",
+                           help="shortest sequence length in random mode")
+    composite.add_argument("--duration-max", type=float, default=None, metavar="SECONDS",
+                           help="longest sequence length in random mode")
 
     behaviour = parser.add_argument_group("behaviour")
     behaviour.add_argument("--dry-run", action="store_true",
@@ -291,16 +315,28 @@ def build_config(args) -> BatchConfig:
 
     if args.compound is not None:
         config.composite.enabled = bool(args.compound)
-    if args.compound_mode:
-        config.composite.mode = args.compound_mode
-    if args.compound_types is not None:
-        config.composite.types_per_sequence = int(args.compound_types)
-    if args.compound_count is not None:
-        config.composite.sequence_count = int(args.compound_count)
+    if args.compound_simultaneous is not None:
+        config.composite.max_simultaneous = int(args.compound_simultaneous)
+    if args.compound_segments is not None:
+        config.composite.max_segments = int(args.compound_segments)
+    if args.compound_per_camera is not None:
+        config.composite.sequences_per_camera = int(args.compound_per_camera)
+    if args.compound_random is not None:
+        config.composite.random = bool(args.compound_random)
+    if args.compound_templates:
+        config.composite.template_path = args.compound_templates
     if args.compound_seed is not None:
         config.composite.seed = int(args.compound_seed)
     if args.compound_output:
         config.composite.output_mode = args.compound_output
+    if args.duration is not None:
+        config.composite.duration = float(args.duration)
+    if args.duration_mode:
+        config.composite.duration_mode = args.duration_mode
+    if args.duration_min is not None:
+        config.composite.duration_min = float(args.duration_min)
+    if args.duration_max is not None:
+        config.composite.duration_max = float(args.duration_max)
     if config.composite.enabled:
         config.composite.validate()
 
@@ -517,46 +553,73 @@ def _dry_run_matrix(config: BatchConfig, entries, runner, args=None) -> int:
         )
     print(f"  templates     : {library.source} ({len(library)})")
     print(f"  provider      : {provider.name} / {provider.status()}")
-    compound_templates: "list" = []
+    motion_count = len(library)
     composite = getattr(config, "composite", None)
     if composite is not None and composite.enabled:
         from blender_motion_pipeline.camera import motion_composite as mc
 
-        names = [template.name for template in library]
+        atoms, atomic_source = mc.load_atomic_library(
+            template_path=composite.template_path,
+            fps=float(config.motion.unit_scale.fps),
+            logger=LOGGER,
+        )
+        if not atoms:
+            print(f"  compound      : PROBLEM: no atomic motions in {atomic_source}")
+            return 1
+        low, high = composite.effective_duration_range()
+        segments = mc.max_segments_for(low, requested=composite.max_segments)
+        print(
+            f"  compound      : {len(atoms)} atom(s) from {to_forward_slashes(atomic_source)}"
+        )
+        print(
+            f"      layout    : up to {segments} segment(s) of at least "
+            f"{mc.MIN_SEGMENT_SECONDS:g} s"
+            + (f" (capped from {composite.max_segments})"
+               if segments < int(composite.max_segments) else "")
+            + f", up to {composite.max_simultaneous} move(s) at once "
+            f"({'random' if composite.random else 'fixed'} counts)"
+        )
+        print(
+            f"      video     : {low:g} s" + (f"-{high:g} s per sequence (random)"
+                                              if high != low else " (fixed)")
+            + f" @ {config.motion.unit_scale.fps:g} fps"
+            f" -> {int(round(low * config.motion.unit_scale.fps))}"
+            f"..{int(round(high * config.motion.unit_scale.fps))} frame(s)"
+        )
+        print(
+            f"      output    : {composite.output_mode} seed={composite.seed}"
+            f" compounds_per_camera={composite.sequences_per_camera}"
+        )
+        for index, atom in enumerate(atoms):
+            if index >= 6:
+                print(f"      ... {len(atoms) - 6} more atom(s)")
+                break
+            print(f"      {atom.name:28s} {', '.join(atom.channels) or '-'}")
+        # A sample plan, so the layout can be eyeballed before a run.
+        sample_rng = random.Random(mc.consecutive_seed(composite.seed, 1))
         try:
-            compound_templates, warnings = mc.build_compound_templates(
-                library,
-                mode=composite.mode,
-                types_per_sequence=composite.types_per_sequence,
-                sequence_count=composite.sequence_count,
+            sample = mc.plan_compound(
+                atoms,
+                duration_seconds=mc.plan_duration(
+                    mode=composite.duration_mode, duration=composite.duration,
+                    minimum=composite.duration_min, maximum=composite.duration_max,
+                    rng=sample_rng,
+                ),
+                fps=float(config.motion.unit_scale.fps),
+                max_simultaneous=composite.max_simultaneous,
+                max_segments=composite.max_segments,
+                randomize=bool(composite.random),
+                rng=sample_rng,
                 seed=composite.seed,
-                max_full_sequences=composite.max_full_sequences,
-                max_partial_sequences=composite.max_partial_sequences,
-                frame_start=config.motion.frame_start,
-                frame_end=config.motion.frame_end,
-                interpolation=config.motion.interpolation,
-                rotation_order=config.motion.unit_scale.rotation_order,
+                source=atomic_source,
             )
-            for warning in warnings:
-                print(f"  WARNING       : {warning}")
-            print(
-                f"  compound      : {len(compound_templates)} sequence(s) "
-                f"({mc.describe_counts(len(names), types_per_sequence=composite.types_per_sequence, mode=composite.mode)})"
-                f" output={composite.output_mode}"
-            )
-            for template in compound_templates[:5]:
-                print(f"      {template.name}")
-            if len(compound_templates) > 5:
-                print(f"      ... {len(compound_templates) - 5} more")
+            print(f"      example   : {mc.describe_plan(sample)}")
+            motion_count = len(atoms) + (1 if composite.want_compound() else 0)
         except Exception as exc:
             print(f"  compound      : PROBLEM: {exc}")
             return 1
-    # The effective template list: base templates plus the compounds, minus whatever
-    # the compound output mode excludes.
-    only_compound = bool(composite is not None and composite.enabled
-                         and composite.output_mode == "only_compound")
-    motion_count = (len(compound_templates) if only_compound
-                    else len(library) + len(compound_templates))
+        if not composite.want_base():
+            motion_count = 1 if composite.want_compound() else 0
     total = 0
     for entry in entries:
         if not entry.exists:

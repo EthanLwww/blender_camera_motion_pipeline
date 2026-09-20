@@ -490,56 +490,102 @@ class MPP_SceneProperties(PropertyGroup):
     trajectory_mode: EnumProperty(name="Trajectory", items=TRAJECTORY_MODES, default="all_frames")
     trajectory_step: IntProperty(name="Trajectory step", default=1, min=1, max=1000)
 
-    # -- compound shots (澶嶅悎杩愰暅) ----------------------------------------
+    # -- compound shots (复合运镜) ----------------------------------------
     compound_enabled: BoolProperty(
         name="Compound shots",
         description=(
-            "Also generate compound sequences: several base camera moves played one "
-            "after another inside the same total frame range (0-80 frames), each part "
-            "starting where the previous one ended"
+            "Generate spatio-temporal compound sequences: the video is split into "
+            "segments and every segment plays one or more atomic camera moves at the "
+            "same time (only moves that do not fight over the same axis, e.g. a pan "
+            "with a tilt, never zoom_in with zoom_out)"
         ),
         default=False,
     )
-    compound_mode: EnumProperty(
-        name="Compound type",
-        description="How the base templates are combined",
-        items=(
-            ("full", "Full compound",
-             "Every ordering of every loaded template: n! sequences"),
-            ("partial", "Partial compound",
-             "Sequences of x distinct templates, a chosen number of them, drawn from "
-             "the x! * C(n, x) possible orderings"),
-        ),
-        default="full",
-    )
-    compound_types: IntProperty(
-        name="Templates per sequence",
-        description="x: how many distinct base templates one compound sequence contains",
-        default=2, min=2, max=10,
-    )
-    compound_count: IntProperty(
-        name="Sequence count",
+    compound_template_path: StringProperty(
+        name="Atomic templates",
         description=(
-            "How many distinct compounds a partial compound generates (at most "
-            "x! * C(n, x); random but seeded, so a re-run reproduces the same set)"
+            "Atomic motion document the compounds are built from. Empty means the "
+            "bundled templates/atomic_motion_templates.json (Pan/Tilt/Roll/Truck/"
+            "Dolly/Pedestal/Arc/Zoom, each in slow/medium/fast)"
         ),
-        default=12, min=1, max=100000,
+        default="",
+        subtype="FILE_PATH",
+    )
+    compound_max_simultaneous: IntProperty(
+        name="Max moves at once",
+        description=(
+            "How many atomic moves may run at the same moment (1-5). Moves that drive "
+            "the same axis cannot be combined"
+        ),
+        default=3, min=1, max=5,
+    )
+    compound_max_segments: IntProperty(
+        name="Max segments",
+        description=(
+            "How many segments the video may be split into. Every segment lasts at "
+            "least 0.5 s, which caps this number for short videos"
+        ),
+        default=4, min=1, max=240,
+    )
+    compound_per_camera: IntProperty(
+        name="Sequences per camera",
+        description=(
+            "How many compound sequences one camera gets. Character/animation "
+            "variants do NOT multiply this: they are spread over the sequences, so "
+            "a camera with four variants and 2 here still yields two compounds"
+        ),
+        default=1, min=1, max=500,
+    )
+    compound_random: BoolProperty(
+        name="Random counts",
+        description=(
+            "On: the two settings above are the maxima of random draws, so every "
+            "sequence gets its own segment count and moves per segment. Off: every "
+            "segment holds exactly that many moves and the video exactly that many "
+            "segments"
+        ),
+        default=True,
     )
     compound_seed: IntProperty(
         name="Random seed",
-        description="Seed for the partial compound draw, so runs are reproducible",
+        description="Seed for the draws, so a re-run reproduces the same sequences",
         default=1234, min=0,
+    )
+    compound_duration_mode: EnumProperty(
+        name="Video length",
+        description="One fixed length for every sequence, or a range each one draws from",
+        items=(
+            ("fixed", "Fixed", "Every sequence lasts the same number of seconds"),
+            ("random", "Random range",
+             "Every sequence draws its own length from the minimum/maximum below"),
+        ),
+        default="fixed",
+    )
+    compound_duration: FloatProperty(
+        name="Seconds",
+        description="Length of every sequence when the video length is fixed",
+        default=4.0, min=0.5, max=600.0,
+    )
+    compound_duration_min: FloatProperty(
+        name="Min seconds",
+        description="Shortest sequence length when the video length is random",
+        default=2.0, min=0.5, max=600.0,
+    )
+    compound_duration_max: FloatProperty(
+        name="Max seconds",
+        description="Longest sequence length when the video length is random",
+        default=6.0, min=0.5, max=600.0,
     )
     compound_output: EnumProperty(
         name="Compound output",
         description="What the run writes",
         items=(
-            ("with_base", "With base shots",
-             "Generate the compound sequences together with the single-template ones"),
+            ("with_base", "With single-move shots",
+             "Generate the compounds together with the one-move-per-video sequences"),
             ("only_compound", "Compound shots only",
-             "Generate only the compound sequences"),
-            ("only_base", "Base shots only",
-             "Ignore the compound configuration and generate only the single-template ones"),
+             "Generate only the compounds"),
+            ("only_base", "Single moves only",
+             "Ignore the compound settings and generate only the one-move sequences"),
         ),
         default="with_base",
     )
@@ -696,11 +742,17 @@ class MPP_SceneProperties(PropertyGroup):
         config.batch.save_validation_report = bool(self.save_validation_report)
         config.batch.verbose = bool(self.verbose_logging)
         config.composite.enabled = bool(self.compound_enabled)
-        config.composite.mode = self.compound_mode
-        config.composite.types_per_sequence = int(self.compound_types)
-        config.composite.sequence_count = int(self.compound_count)
+        config.composite.template_path = self.compound_template_path.strip()
+        config.composite.max_simultaneous = int(self.compound_max_simultaneous)
+        config.composite.max_segments = int(self.compound_max_segments)
+        config.composite.sequences_per_camera = int(self.compound_per_camera)
+        config.composite.random = bool(self.compound_random)
         config.composite.seed = int(self.compound_seed)
         config.composite.output_mode = self.compound_output
+        config.composite.duration_mode = self.compound_duration_mode
+        config.composite.duration = float(self.compound_duration)
+        config.composite.duration_min = float(self.compound_duration_min)
+        config.composite.duration_max = float(self.compound_duration_max)
         config.batch.character_asset_root = (
             normalize_path(self.character_asset_root) if self.character_asset_root else ""
         )
@@ -807,71 +859,78 @@ class MPP_SceneProperties(PropertyGroup):
         ])
 
     # -- compound shots ---------------------------------------------------
-    def compound_counts(self) -> "tuple[int, int]":
-        """``(planned, space)`` compound sequences for the current settings.
+    def compound_duration_range(self) -> "tuple[float, float]":
+        """``(min, max)`` seconds the sequences will last, as configured.
 
-        ``space`` is how many distinct compounds exist (``n!`` for a full compound,
-        ``x! * C(n, x)`` for a partial one) and ``planned`` how many will be
-        generated, so the panel can show "12 of 90" before a run starts.
+        An inverted range is *not* silently repaired: the panel reports it (and the
+        config validation refuses it), because quietly swapping the numbers would
+        hide a typo.
         """
-        from .camera import motion_composite as mc
-        from .config.models import CompositeSection
+        if self.compound_duration_mode == "random":
+            return float(self.compound_duration_min), float(self.compound_duration_max)
+        return float(self.compound_duration), float(self.compound_duration)
 
-        total = int(self.motion_count)
-        if total < 2:
-            return 0, 0
-        if self.compound_mode == "full":
-            space = mc.factorial(total)
-            return (0, space) if space > CompositeSection().max_full_sequences else (space, space)
-        x = int(self.compound_types)
-        if x > total or x < 2:
-            return 0, 0
-        space = mc.ordered_count(total, x)
-        return min(int(self.compound_count), space), space
+    def compound_limits(self) -> "tuple[int, int]":
+        """``(segments, moves at once)`` the current settings allow.
+
+        The segment count is capped by the 0.5 s minimum segment length, which is
+        what makes "max segments" a *ceiling* rather than a promise.
+        """
+        from .camera.motion_composite import (
+            MAX_SIMULTANEOUS_LIMIT, MIN_SEGMENT_SECONDS, max_segments_for,
+        )
+
+        simultaneous = max(1, min(int(self.compound_max_simultaneous),
+                                  MAX_SIMULTANEOUS_LIMIT))
+        low, high = self.compound_duration_range()
+        shortest = max(MIN_SEGMENT_SECONDS, min(low, high))
+        segments = max_segments_for(shortest, requested=int(self.compound_max_segments))
+        return segments, simultaneous
 
     def compound_ok(self) -> bool:
         """Can this configuration actually run?"""
         if not self.compound_enabled:
             return True
-        planned, space = self.compound_counts()
-        return planned > 0 and space > 0
+        if self.compound_duration_mode == "random" and (
+            float(self.compound_duration_max) < float(self.compound_duration_min)
+        ):
+            return False
+        return True
 
     def composite_summary(self) -> str:
         """Multi-line description of the compound plan (panel label)."""
-        from .camera import motion_composite as mc
-        from .config.models import CompositeSection
+        from .camera.motion_composite import MIN_SEGMENT_SECONDS
 
         if not self.compound_enabled:
-            return "Compound shots are off: one sequence per template."
+            return "Compound shots are off: one sequence per atomic move."
         output = {
-            "with_base": "together with the base shots",
+            "with_base": "with the single-move shots",
             "only_compound": "compound shots only",
-            "only_base": "base shots only -- nothing compound will be written",
+            "only_base": "single moves only -- nothing compound will be written",
         }.get(self.compound_output, self.compound_output)
-        total = int(self.motion_count)
-        if total < 2:
-            return (f"Compound shots need at least 2 loaded templates (currently {total}).\n"
-                    f"Load motion templates, or widen the Motion filter. Output: {output}.")
-        if self.compound_mode == "full":
-            count = mc.factorial(total)
-            limit = CompositeSection().max_full_sequences
-            if count > limit:
-                return (f"Full compound of {total} templates = {count} sequences (n!), above the "
-                        f"{limit} limit.\nNarrow the template set with the Motion filter, or switch "
-                        f"to Partial compound.")
-            return (f"Full compound: {count} sequence(s) = {total}!\n"
-                    f"Each part plays in its own window of the same total frame range a "
-                    f"single template uses. Output: {output}.")
-        x = int(self.compound_types)
-        if x > total:
-            return (f"Partial compound needs at least {x} templates, but only {total} are loaded.\n"
-                    f"Widen the Motion filter or lower Templates per sequence.")
-        space = mc.ordered_count(total, x)
-        planned = min(int(self.compound_count), space)
-        extra = "" if planned == int(self.compound_count) else f" (capped from {int(self.compound_count)})"
-        return (f"Partial compound: {planned}{extra} of {space} distinct {x}-template ordering(s)\n"
-                f"= {x}! x C({total},{x}), drawn with seed {self.compound_seed}. "
-                f"Output: {output}.")
+        low, high = self.compound_duration_range()
+        segments, simultaneous = self.compound_limits()
+        if high < low:
+            return (f"Video length range is inverted ({low:g} s > {high:g} s).\n"
+                    f"Make Min seconds <= Max seconds.")
+        length = (f"{low:.2f} s (fixed)" if high == low
+                  else f"{low:.2f}-{high:.2f} s (random per sequence)")
+        cap = ""
+        if segments < int(self.compound_max_segments):
+            cap = (f"  (capped from {int(self.compound_max_segments)}: a segment lasts at "
+                   f"least {MIN_SEGMENT_SECONDS:g} s)")
+        per_camera = max(1, int(self.compound_per_camera))
+        cameras = max(1, int(self.motion_count)) if per_camera > 1 else 1
+        return (
+            f"Video length: {length}\n"
+            f"Segments: up to {segments}{cap}\n"
+            f"Compounds: {per_camera} per camera"
+            + (f" (x {cameras} camera(s) if all are selected)" if per_camera > 1 else "")
+            + "\n"
+            f"Moves at once: up to {simultaneous} of 5 "
+            f"({'random counts' if self.compound_random else 'fixed counts'})\n"
+            f"Output: {output}"
+        )
 
     def from_config(self, config: BatchConfig) -> None:
         """Push a :class:`BatchConfig` into the panel fields."""
@@ -882,11 +941,17 @@ class MPP_SceneProperties(PropertyGroup):
         self.save_validation_report = bool(config.batch.save_validation_report)
         self.verbose_logging = bool(config.batch.verbose)
         self.compound_enabled = bool(config.composite.enabled)
-        self.compound_mode = config.composite.mode
-        self.compound_types = int(config.composite.types_per_sequence)
-        self.compound_count = int(config.composite.sequence_count)
+        self.compound_template_path = config.composite.template_path
+        self.compound_max_simultaneous = int(config.composite.max_simultaneous)
+        self.compound_max_segments = int(config.composite.max_segments)
+        self.compound_per_camera = int(config.composite.sequences_per_camera)
+        self.compound_random = bool(config.composite.random)
         self.compound_seed = int(config.composite.seed)
         self.compound_output = config.composite.output_mode
+        self.compound_duration_mode = config.composite.duration_mode
+        self.compound_duration = float(config.composite.duration)
+        self.compound_duration_min = float(config.composite.duration_min)
+        self.compound_duration_max = float(config.composite.duration_max)
         self.character_asset_root = config.batch.character_asset_root
         self.animation_asset_root = config.batch.animation_asset_root
         if config.batch.character_provider in ("auto", "blender", "null", "unreal_metahuman"):

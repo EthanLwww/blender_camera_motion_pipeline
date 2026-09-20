@@ -658,80 +658,122 @@ def _section_from_dict(section_cls, raw: dict, base, warnings: "list[str]"):
 
 @dataclass
 class CompositeSection:
-    """Compound shots: base templates played one after another in one sequence.
+    """Compound shots: several atomic moves at once, in segments (时空复合运镜).
 
-    A compound keeps the **same total frame range** as a single template and only
-    concatenates the order, so ``pan_right + hitchcock`` is still 0..80 frames: the
-    range is split into windows, one per part, and each part starts where the
-    previous one ended.
+    A compound is planned in the **spatio-temporal** sense: the video is divided
+    into segments and each segment plays up to ``max_simultaneous`` atomic moves
+    simultaneously (only atoms whose channels do not collide -- a pan and a tilt
+    may share a segment, a ``zoom_in`` and a ``zoom_out`` may not).
 
-    * ``mode = "full"``: every ordering of every loaded template -- ``n!`` sequences.
-    * ``mode = "partial"``: ``types_per_sequence`` distinct templates per sequence,
-      ``sequence_count`` of them, drawn deterministically from the
-      ``x! * C(n, x)`` possible orderings.
-    * ``output_mode``: whether compounds are generated next to the base shots, on
-      their own, or whether only the base shots are generated.
+    * ``max_simultaneous``: how many atoms may run at the same moment (1..5).
+    * ``max_segments``: how many segments a video may have.  Bounded in practice by
+      the 0.5 s minimum segment length.
+    * ``random``: when true those two are the *maxima* of per-sequence random
+      draws; when false every segment holds exactly ``max_simultaneous`` atoms and
+      the video holds exactly ``max_segments`` segments.  Which atoms and speeds
+      are used stays random either way (seeded through ``seed``), otherwise every
+      sequence would be the same shot.
+    * ``duration_mode``/``duration``/``duration_min``/``duration_max``: the video
+      length in seconds -- one fixed value, or a range each sequence draws from.
+      The frame range follows from it (``duration * fps``).
+    * ``template_path``: the atomic vocabulary document; empty means the bundled
+      ``templates/atomic_motion_templates.json``.
+    * ``output_mode``: compounds next to the single-atom shots, compounds only, or
+      single-atom shots only.
     """
 
     enabled: bool = False
-    mode: str = "full"
-    #: x -- how many distinct templates one compound sequence contains (2..10).
-    types_per_sequence: int = 2
-    #: How many distinct compounds a partial compound should produce.
-    sequence_count: int = 12
-    #: Seeded so a re-run (and ``--resume``) reproduces the same set.
+    template_path: str = ""
+    #: 1..5 atoms may share a moment.
+    max_simultaneous: int = 3
+    #: How many compound sequences **one camera** gets.  Deliberately not
+    #: multiplied by the character/animation variants: a camera with four variants
+    #: and ``sequences_per_camera = 2`` still produces two compounds, spread over the
+    #: first two variants, instead of eight.
+    sequences_per_camera: int = 1
+    #: How many segments a video may be split into.
+    max_segments: int = 4
+    #: Counts are maxima of random draws (true) or fixed values (false).
+    random: bool = True
+    #: Seeded so a re-run (and ``--resume``) reproduces the same plans.
     seed: int = 1234
     output_mode: str = "with_base"
-    #: Safety rails: ``n!`` and ``x! * C(n, x)`` grow far too fast to generate
-    #: blindly (80! is not a number of sequences anyone can render).
-    max_full_sequences: int = 5040          # 7! -- enough for an 7-template set
-    max_partial_sequences: int = 100000
+    #: Video length: one value, or a range each sequence draws from.
+    duration_mode: str = "fixed"
+    duration: float = 4.0
+    duration_min: float = 2.0
+    duration_max: float = 6.0
 
-    MAX_TYPES_PER_SEQUENCE = 10
+    #: Mirrors ``camera.motion_composite`` (imported lazily there to avoid a cycle).
+    MAX_SIMULTANEOUS_LIMIT = 5
+    MAX_SEQUENCES_PER_CAMERA = 500
+    MIN_SEGMENT_SECONDS = 0.5
+    OUTPUT_MODES = ("with_base", "only_compound", "only_base")
+    DURATION_MODES = ("fixed", "random")
 
     @classmethod
     def from_dict(cls, raw: dict, warnings: "list[str]"):
         raw = dict(raw or {})
         instance = cls(
             enabled=_read_typed(raw, "enabled", bool, False, warnings),
-            mode=_read_choice(raw, "mode", ("full", "partial"), "full", warnings),
-            types_per_sequence=_read_typed(raw, "types_per_sequence", int, 2, warnings),
-            sequence_count=_read_typed(raw, "sequence_count", int, 12, warnings),
+            template_path=_read_typed(raw, "template_path", str, "", warnings),
+            max_simultaneous=_read_typed(raw, "max_simultaneous", int, 3, warnings),
+            max_segments=_read_typed(raw, "max_segments", int, 4, warnings),
+            sequences_per_camera=_read_typed(raw, "sequences_per_camera", int, 1, warnings),
+            random=_read_typed(raw, "random", bool, True, warnings),
             seed=_read_typed(raw, "seed", int, 1234, warnings),
-            output_mode=_read_choice(
-                raw, "output_mode", ("with_base", "only_compound", "only_base"),
-                "with_base", warnings,
-            ),
-            max_full_sequences=_read_typed(raw, "max_full_sequences", int, 5040, warnings),
-            max_partial_sequences=_read_typed(
-                raw, "max_partial_sequences", int, 100000, warnings
-            ),
+            output_mode=_read_choice(raw, "output_mode", cls.OUTPUT_MODES,
+                                     "with_base", warnings),
+            duration_mode=_read_choice(raw, "duration_mode", cls.DURATION_MODES,
+                                       "fixed", warnings),
+            duration=_read_typed(raw, "duration", float, 4.0, warnings),
+            duration_min=_read_typed(raw, "duration_min", float, 2.0, warnings),
+            duration_max=_read_typed(raw, "duration_max", float, 6.0, warnings),
         )
         _report_unknown(raw, "composite", warnings)
         instance.validate()
         return instance
 
     def validate(self) -> None:
-        if self.mode not in ("full", "partial"):
-            raise ConfigError("composite.mode must be 'full' or 'partial'")
-        if self.output_mode not in ("with_base", "only_compound", "only_base"):
+        if self.output_mode not in self.OUTPUT_MODES:
             raise ConfigError(
-                "composite.output_mode must be 'with_base', 'only_compound' or 'only_base'"
+                f"composite.output_mode must be one of {', '.join(self.OUTPUT_MODES)}"
             )
-        if not 2 <= int(self.types_per_sequence) <= self.MAX_TYPES_PER_SEQUENCE:
+        if self.duration_mode not in self.DURATION_MODES:
             raise ConfigError(
-                f"composite.types_per_sequence must be between 2 and "
-                f"{self.MAX_TYPES_PER_SEQUENCE}"
+                f"composite.duration_mode must be one of {', '.join(self.DURATION_MODES)}"
             )
-        if int(self.sequence_count) < 1:
-            raise ConfigError("composite.sequence_count must be >= 1")
-        if int(self.max_full_sequences) < 1:
-            raise ConfigError("composite.max_full_sequences must be >= 1")
-        if int(self.max_partial_sequences) < 1:
-            raise ConfigError("composite.max_partial_sequences must be >= 1")
+        if not 1 <= int(self.max_simultaneous) <= self.MAX_SIMULTANEOUS_LIMIT:
+            raise ConfigError(
+                f"composite.max_simultaneous must be between 1 and "
+                f"{self.MAX_SIMULTANEOUS_LIMIT}"
+            )
+        if int(self.max_segments) < 1:
+            raise ConfigError("composite.max_segments must be >= 1")
+        if not 1 <= int(self.sequences_per_camera) <= self.MAX_SEQUENCES_PER_CAMERA:
+            raise ConfigError(
+                f"composite.sequences_per_camera must be between 1 and "
+                f"{self.MAX_SEQUENCES_PER_CAMERA}"
+            )
+        if float(self.duration) < self.MIN_SEGMENT_SECONDS:
+            raise ConfigError(
+                f"composite.duration must be at least {self.MIN_SEGMENT_SECONDS:g} s"
+            )
+        if float(self.duration_min) < self.MIN_SEGMENT_SECONDS:
+            raise ConfigError(
+                f"composite.duration_min must be at least {self.MIN_SEGMENT_SECONDS:g} s"
+            )
+        if float(self.duration_max) < float(self.duration_min):
+            raise ConfigError("composite.duration_max must be >= composite.duration_min")
+
+    def effective_duration_range(self) -> "tuple[float, float]":
+        """``(min, max)`` seconds the sequence lengths are drawn from."""
+        if self.duration_mode == "random":
+            return float(self.duration_min), float(self.duration_max)
+        return float(self.duration), float(self.duration)
 
     def want_base(self) -> bool:
-        """Should the run generate the plain, single-template sequences?"""
+        """Should the run generate the plain, single-atom sequences?"""
         return not (self.enabled and self.output_mode == "only_compound")
 
     def want_compound(self) -> bool:
@@ -900,10 +942,12 @@ def describe_config(config: BatchConfig) -> str:
         f" @{config.render.fps}fps -> {config.render.video_format}",
         (
             "composite      : enabled"
-            f" mode={config.composite.mode}"
-            + (f" x={config.composite.types_per_sequence} count={config.composite.sequence_count}"
-               if config.composite.mode == "partial" else "")
-            + f" output={config.composite.output_mode} seed={config.composite.seed}"
+            f" max_simultaneous={config.composite.max_simultaneous}"
+            f" max_segments={config.composite.max_segments}"
+            f" per_camera={config.composite.sequences_per_camera}"
+            f" {'random' if config.composite.random else 'fixed'}"
+            f" duration={'%g-%g' % config.composite.effective_duration_range()}s"
+            f" output={config.composite.output_mode} seed={config.composite.seed}"
             if config.composite.enabled else "composite      : off"
         ),
         f"scenes         : {len(config.scenes)}",

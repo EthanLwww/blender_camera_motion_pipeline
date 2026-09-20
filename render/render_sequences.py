@@ -1156,6 +1156,10 @@ def render_sequence(job: dict, args, *, mappings, check_assets: bool = True) -> 
         return result
 
     _copy_sequence_config(job["sequence_dir"], os.path.dirname(outputs["video"]))
+    plan_path = _write_motion_plan(job["sequence_dir"], job["sequence_id"],
+                                   os.path.dirname(outputs["video"]), config)
+    if plan_path:
+        outputs["motion_plan"] = plan_path
     _write_render_log(outputs["log"], job, result, rows, applied, outputs)
     result["ok"] = True
     result["files"] = {key: to_forward_slashes(value) for key, value in outputs.items()}
@@ -1358,6 +1362,38 @@ def _copy_sequence_config(sequence_dir: str, output_dir: str) -> str:
         return target
     except OSError as exc:
         LOGGER.warning("could not copy sequence_config.json into %s: %s", output_dir, exc)
+        return ""
+
+
+def _write_motion_plan(sequence_dir: str, sequence_id: str, output_dir: str,
+                       config) -> str:
+    """Write the compound shot report (``<sequence>_motion_plan.json``) beside the video.
+
+    The plan is produced during generation; rendering re-emits it there so a dataset
+    consumer finds "which moves ran when, and how fast" next to the mp4 without
+    walking back into the sequence tree.  The shape is the list of segments::
+
+        [{"start_time": 0.0, "end_time": 3.3,
+          "basic_movement": [{"type": "Pan", "direction": "left", "speed": "medium"}]}, ...]
+    """
+    target = os.path.join(normalize_path(output_dir), f"{sequence_id}_motion_plan.json")
+    from blender_motion_pipeline.camera.motion_composite import ordered_report
+
+    plan = (config or {}).get("motion_plan") if isinstance(config, dict) else None
+    if isinstance(plan, dict) and plan.get("shot_report"):
+        ensure_dir(output_dir)
+        return save_json_file(target, ordered_report(plan["shot_report"]), sort_keys=False)
+    source = os.path.join(normalize_path(sequence_dir), f"{sequence_id}_motion_plan.json")
+    if not os.path.isfile(source):
+        return ""
+    if os.path.normcase(source) == os.path.normcase(target):
+        return target
+    try:
+        ensure_dir(output_dir)
+        shutil.copy2(source, target)
+        return target
+    except OSError as exc:
+        LOGGER.warning("could not copy the motion plan into %s: %s", output_dir, exc)
         return ""
 
 

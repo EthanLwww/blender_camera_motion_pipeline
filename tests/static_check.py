@@ -59,6 +59,7 @@ SKIP_DEBUG_SCAN = {
     "render_sequences.py",
     "pack_textures.py",          # a standalone command-line tool: printing is its UI
     "migrate_unreal_templates.py",   # a standalone migration tool: same
+    "make_atomic_templates.py",      # a standalone document generator: same
     "operators.py",
     "test_blender_integration.py",
     "test_render_workflow.py",   # reports fixture setup

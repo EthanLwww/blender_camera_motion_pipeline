@@ -20,7 +20,9 @@ from __future__ import annotations
 import copy
 import math
 import os
+import random
 import time
+import zlib
 import traceback
 from dataclasses import dataclass, field
 from typing import Sequence
@@ -33,6 +35,15 @@ from ..camera.camera_export import (
 )
 from ..camera.camera_search import CameraSearch, SearchResult, apply_candidate
 from ..camera.camera_validator import CameraValidator, ValidationReport, validate_camera_static
+from ..camera.motion_composite import (
+    COMPOUND_MOTION_NAME,
+    consecutive_seed,
+    flatten_plan,
+    load_atomic_library,
+    plan_compound,
+    plan_duration,
+    plan_single,
+)
 from ..camera.motion_templates import (
     MotionAnimation,
     MotionTemplate,
@@ -52,7 +63,14 @@ from ..config.models import (
 )
 from ..io.json_io import save_json_file
 from ..io.manifest import ManifestWriter, utc_now_iso
-from ..io.path_utils import ensure_dir, normalize_path, relative_to, sanitize_relpath, to_forward_slashes
+from ..io.path_utils import (
+    ensure_dir,
+    normalize_path,
+    relative_to,
+    safe_filename,
+    sanitize_relpath,
+    to_forward_slashes,
+)
 from ..utils.logging_utils import RunLogger, get_logger
 from ..utils.animation import set_interpolation
 from ..utils.task_control import TaskController
@@ -142,18 +160,29 @@ def assert_object_parenting(camera_obj) -> None:
 # data
 # --------------------------------------------------------------------------
 def _is_compound(template) -> bool:
-    """True when *template* was flattened from a compound recipe."""
+    """True when *template* was flattened from a compound plan."""
     parameters = getattr(template, "parameters", None) or {}
-    return isinstance(parameters.get("compound"), dict)
+    block = parameters.get("compound")
+    return isinstance(block, dict) and bool(block.get("compound", True))
+
+
+def _is_compound_plan(plan) -> bool:
+    """True when *plan* is a spatio-temporal compound (not a single-atom shot)."""
+    return bool(getattr(plan, "compound", False))
 
 
 def compound_parts(template) -> "list[str]":
-    """The ordered base template names behind a compound template ([] otherwise)."""
+    """The distinct atom names behind a compound plan ([] otherwise)."""
     parameters = getattr(template, "parameters", None) or {}
     block = parameters.get("compound")
-    if isinstance(block, dict):
-        return [str(name) for name in (block.get("parts") or [])]
-    return []
+    if not isinstance(block, dict):
+        return []
+    names: "list[str]" = []
+    for segment in block.get("segments") or []:
+        for name in segment.get("motions") or []:
+            if name not in names:
+                names.append(str(name))
+    return names
 
 
 @dataclass
@@ -163,13 +192,17 @@ class SequenceRequest:
     scene_entry: SceneEntry
     scene_name: str
     motion_name: str
-    template: MotionTemplate
+    template: "MotionTemplate | None"
     camera_name: str
     has_character: bool
     character: "CharacterDescriptor | None" = None
     animation: object | None = None
     character_note: str = ""
     index: int = 0
+    #: Set for plan-driven shots (atomic single moves and spatio-temporal compounds):
+    #: the segment layout, flattened into ``template`` once the camera's lens is
+    #: known.  ``None`` for the classic "one template in, one sequence out" flow.
+    plan: object | None = None
 
     @property
     def motion_folder(self) -> str:
@@ -340,24 +373,38 @@ class SequenceGenerator:
         sequence ids and its numbering all agree, and a partial re-run of one
         motion never renumbers another motion's sequences.
 
-        Compound ("复合") recipes are expanded into ordinary templates first, so a
-        compound sequence is just another motion folder here -- validation, search,
-        baking and rendering need to know nothing about it.
+        Two shapes are possible:
+
+        * **Plan-driven** (``composite.enabled`` and an atomic document is
+          loadable): every sequence is a :class:`MotionPlan` -- one atom for a
+          single-move shot, several per segment for a compound.  The plan is
+          flattened into an ordinary template once the camera's lens is known.
+        * **Classic**: every template in the library becomes one sequence, with the
+          template's own frame range.
         """
-        from ..io.path_utils import safe_filename
-
         scene_name = scene_name_for(scene_entry, self.config.batch.scene_name_mode)
-        requests: "list[SequenceRequest]" = []
         del start_index  # numbering is per motion folder, not global
-        templates = list(library)
         composite = getattr(self.config, "composite", None)
-        if composite is not None and composite.want_compound():
-            templates = templates + self._compound_templates(library)
-        if composite is not None and not composite.want_base():
-            # ``only_compound``: drop the single-template requests, keep the compounds.
-            templates = [t for t in templates if _is_compound(t)]
+        if composite is not None and composite.enabled:
+            atoms, atomic_source = load_atomic_library(
+                template_path=composite.template_path,
+                fps=float(self.motion.unit_scale.fps),
+                logger=self.logger,
+            )
+            if atoms:
+                return self._plan_requests(
+                    scene_entry, scene_name, atoms, atomic_source,
+                    cameras=cameras, character_variants=character_variants,
+                )
+            self.notes.append(
+                "composite is enabled but no atomic motions could be loaded; "
+                "falling back to the classic one-template-per-sequence flow"
+            )
+            if self.logger is not None:
+                self.logger.warning("composite: %s", self.notes[-1])
 
-        for template in templates:
+        requests: "list[SequenceRequest]" = []
+        for template in list(library):
             motion_name = safe_filename(template.name, fallback="motion")
             index = 1
             for camera_name in cameras:
@@ -377,35 +424,153 @@ class SequenceGenerator:
                     index += 1
         return requests
 
-    def _compound_templates(self, library) -> "list[MotionTemplate]":
-        """Flatten the configured compound recipes into ordinary templates."""
-        from ..camera.motion_composite import build_compound_templates
+    def _plan_requests(
+        self,
+        scene_entry: SceneEntry,
+        scene_name: str,
+        atoms,
+        atomic_source: str,
+        *,
+        cameras: Sequence[str],
+        character_variants: Sequence[tuple],
+    ) -> "list[SequenceRequest]":
+        """Build the plan-driven requests: single-atom shots and compounds.
 
+        Each sequence draws its own duration (fixed or from the configured range)
+        and, for compounds, its own segment layout -- so a batch is a varied set of
+        shots that is still reproducible from ``composite.seed``.
+        """
         composite = self.config.composite
-        templates, warnings = build_compound_templates(
-            library,
-            mode=composite.mode,
-            types_per_sequence=composite.types_per_sequence,
-            sequence_count=composite.sequence_count,
-            seed=composite.seed,
-            max_full_sequences=composite.max_full_sequences,
-            max_partial_sequences=composite.max_partial_sequences,
-            frame_start=self.motion.frame_start,
-            frame_end=self.motion.frame_end,
-            interpolation=self.motion.interpolation,
-            rotation_order=self.unit_scale.rotation_order,
-            logger=self.logger,
-        )
-        for warning in warnings:
-            self.notes.append(warning)
-            if self.logger is not None:
-                self.logger.warning("composite: %s", warning)
-        if templates and self.logger is not None:
-            self.logger.info(
-                "composite: %d compound shot(s) ready (%s, seed=%s)",
-                len(templates), composite.mode, composite.seed,
+        fps = float(self.motion.unit_scale.fps)
+        requests: "list[SequenceRequest]" = []
+        seed = int(composite.seed)
+
+        def plan_seed(kind: str, motion_name: str, camera_name: str, slot: int,
+                      attempt: int = 0) -> int:
+            """A seed that depends only on *what* is being planned, never on order.
+
+            Crunching the sequence counter (the obvious choice) coupled every plan to
+            how many requests happened to be queued before it, so adding single-move
+            shots silently rewrote the compounds.  Keying on
+            ``(kind, motion, camera, slot)`` keeps every plan an independent random
+            draw that a re-run reproduces exactly (``attempt`` only moves on when a
+            duplicate plan has to be re-drawn).
+            """
+            key = f"{kind}|{motion_name}|{camera_name}|{slot}|{attempt}".encode("utf-8")
+            return consecutive_seed(seed, zlib.crc32(key))
+
+        def fingerprint(plan) -> str:
+            return "|".join(
+                f"{segment.index}:{segment.start_frame}-{segment.end_frame}:"
+                + ",".join(motion.name for motion in segment.motions)
+                for segment in plan.segments
             )
-        return templates
+
+        #: Plans already drawn per camera, so a run never repeats a compound.
+        seen_plans: "dict[str, set]" = {}
+
+        def draw_duration(rng) -> float:
+            return plan_duration(
+                mode=composite.duration_mode,
+                duration=composite.duration,
+                minimum=composite.duration_min,
+                maximum=composite.duration_max,
+                rng=rng,
+            )
+
+        def add(kind: str, motion_name: str, atom=None, *, per_camera: int = 0) -> None:
+            """Queue ``per_camera`` sequences for every camera.
+
+            ``per_camera`` defaults to one sequence per character/animation variant
+            (the classic matrix).  For compounds it is the configured **per-camera
+            total** instead, and the variants are then *spread over* the sequences
+            rather than multiplying them -- a camera with four variants and a total
+            of two yields two compounds, not eight.
+            """
+            slots = max(1, int(per_camera) or len(character_variants))
+            index = 1
+            for camera_name in cameras:
+                for slot in range(slots):
+                    if character_variants:
+                        has_character, character, animation, note = (
+                            character_variants[slot % len(character_variants)]
+                        )
+                    else:
+                        has_character, character, animation, note = (False, None, None, "")
+                    # Purely random, but never a repeat: a compound is re-drawn (with
+                    # the next sub-seed) while its plan collides with one this camera
+                    # already has, so N sequences per camera are N *different* shots
+                    # instead of a walk through the combination list.
+                    drawn: "set[str]" = seen_plans.setdefault(camera_name, set())
+                    for attempt in range(8):
+                        sequence_seed = plan_seed(kind, motion_name, camera_name, slot, attempt)
+                        rng = random.Random(sequence_seed)
+                        duration = draw_duration(rng)
+                        if kind == "compound":
+                            plan = plan_compound(
+                                atoms,
+                                duration_seconds=duration,
+                                fps=fps,
+                                max_simultaneous=composite.max_simultaneous,
+                                max_segments=composite.max_segments,
+                                randomize=bool(composite.random),
+                                rng=rng,
+                                seed=sequence_seed,
+                                frame_start=0,
+                                source=atomic_source,
+                            )
+                        else:
+                            plan = plan_single(
+                                atom,
+                                duration_seconds=duration,
+                                fps=fps,
+                                frame_start=0,
+                                source=atomic_source,
+                                seed=sequence_seed,
+                            )
+                        if kind != "compound":
+                            break
+                        mark = fingerprint(plan)
+                        if mark not in drawn:
+                            break
+                    if kind == "compound":
+                        # Only compounds take part in the duplicate check: a single-move
+                        # shot has a plan of its own and must not shadow a compound.
+                        drawn.add(mark)
+                    for note_text in plan.notes:
+                        if note_text not in self.notes:
+                            self.notes.append(note_text)
+                    requests.append(SequenceRequest(
+                        scene_entry=scene_entry,
+                        scene_name=scene_name,
+                        motion_name=motion_name,
+                        template=None,
+                        camera_name=camera_name,
+                        has_character=bool(has_character),
+                        character=character,
+                        animation=animation,
+                        character_note=note,
+                        index=index,
+                        plan=plan,
+                    ))
+                    index += 1
+
+        if composite.want_base():
+            for atom in atoms:
+                add("single", safe_filename(atom.name, fallback="atom"), atom=atom)
+        if composite.want_compound():
+            add("compound", COMPOUND_MOTION_NAME,
+                per_camera=int(composite.sequences_per_camera))
+        if self.logger is not None:
+            compounds = sum(1 for request in requests if _is_compound_plan(request.plan))
+            self.logger.info(
+                "composite: %d sequence plan(s) ready (%d atom(s), %d compound(s), "
+                "max_simultaneous=%d, max_segments=%d, per_camera=%d, %s, seed=%s)",
+                len(requests), len(atoms), compounds, composite.max_simultaneous,
+                composite.max_segments, composite.sequences_per_camera,
+                "random" if composite.random else "fixed", composite.seed,
+            )
+        return requests
 
     def generate(self, request: SequenceRequest) -> SequenceResult:
         """Generate (or skip) one sequence."""
@@ -513,6 +678,22 @@ class SequenceGenerator:
 
         base_quaternion = matrix_to_quaternion(base_matrix)
 
+        # A plan-driven shot becomes an ordinary per-frame template here, where the
+        # camera's lens is known (a zoom plan is relative to it).  Its frame range
+        # is the plan's -- the video duration, not a template's own span.
+        plan = getattr(request, "plan", None)
+        if plan is not None:
+            request.template = flatten_plan(plan, base_focal=original.lens)
+            range_start, range_end = int(plan.frame_start), int(plan.frame_end)
+            run_log.log(
+                f"plan: {plan.duration_seconds:.2f} s, {len(plan.segments)} segment(s), "
+                f"up to {max((len(s.motions) for s in plan.segments), default=0)} motion(s) "
+                f"at once -> frames {range_start}..{range_end}"
+            )
+        else:
+            range_start = self.motion.frame_start if self.motion.frame_end is not None else None
+            range_end = self.motion.frame_end
+
         def make_animation_for(position, quaternion=None, rotation_adjust=None):
             """Animation anchored at ``position``, in the frame ``rotation_adjust`` gives.
 
@@ -540,8 +721,8 @@ class SequenceGenerator:
                 base_matrix=matrix,
                 base_focal=original.lens,
                 base_quaternion=quaternion_result if quaternion_result is not None else base_quaternion,
-                frame_start=self.motion.frame_start if self.motion.frame_end is not None else None,
-                frame_end=self.motion.frame_end,
+                frame_start=range_start,
+                frame_end=range_end,
             )
 
         animation = make_animation_for(base_position)
@@ -1079,12 +1260,22 @@ class SequenceGenerator:
             "template_source": request.template.source,
             "template_parameters": dict(request.template.parameters),
         }
+        plan = getattr(request, "plan", None)
+        if plan is not None:
+            metadata.extra["motion_plan"] = plan.to_dict()
         if animation_payload:
             # Recorded whether or not a blend was written: it is what makes the
             # sequence replayable, and it costs ~15 KB next to a 265 MB scene copy.
             metadata.extra[PAYLOAD_KEY] = animation_payload
         metadata_path = os.path.join(output_dir, f"{sequence_id}.json")
         files["metadata"] = metadata.write(metadata_path)
+
+        if plan is not None:
+            # The shot report: what moved, when, and how fast.  Written next to the
+            # sequence and copied beside the rendered video (see render/metadata_exporter).
+            plan_path = os.path.join(output_dir, f"{sequence_id}_motion_plan.json")
+            # ``sort_keys=False``: the shot report has a documented field order.
+            files["motion_plan"] = save_json_file(plan_path, plan.report(), sort_keys=False)
 
         trajectory_path = os.path.join(output_dir, f"{sequence_id}_camera.txt")
         files["camera_trajectory"] = write_trajectory_txt(
@@ -1108,6 +1299,10 @@ class SequenceGenerator:
         config_payload["camera_animation"] = payload_summary(
             animation_payload or {}, filename=os.path.basename(metadata_path)
         )
+        if plan is not None:
+            # The renderer re-emits this beside the video, which is where a dataset
+            # consumer expects to find "what the camera did, and when".
+            config_payload["motion_plan"] = plan.to_dict()
         files["sequence_config"] = save_json_file(config_path, config_payload)
 
         # -- validation report ----------------------------------------------
