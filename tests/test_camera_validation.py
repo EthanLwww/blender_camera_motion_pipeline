@@ -613,7 +613,7 @@ def build_suite() -> Suite:
         template = mt.MotionTemplate.from_dict({
             "id": "push", "keys": [
                 {"frame": 0, "location": [0, 0, 0], "rotation": [0, 0, 0], "focal": 35},
-                {"frame": 4, "location": [400, 0, 0], "rotation": [0, 0, 0], "focal": 35},
+                {"frame": 4, "location": [0, 0, -4.0], "rotation": [0, 0, 0], "focal": 35},
             ],
         })
         # A camera looking along +X, turned 90 deg about Z so it looks along +Y.
@@ -642,29 +642,80 @@ def build_suite() -> Suite:
             close(along_forward, 1.0, tol=1e-6,
                   message=f"{label}: the push must follow the camera's own view axis")
 
-    @suite.case("world_to_camera_row produces a valid OpenCV extrinsic")
+    @suite.case("world_to_camera_row produces a proper Blender extrinsic")
     def _():
-        # Camera at (0, 0, -5) with identity rotation looks toward +Z.
+        # Camera at (0, 0, -5) with identity rotation: Blender's local axes are
+        # world +X (right), +Y (up), +Z (back), so it looks along world -Z.
         matrix = [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, -5], [0, 0, 0, 1]]
         row = ce.world_to_camera_row(matrix)
-        vec_close(row[0:3], (1.0, 0.0, 0.0), tol=1e-9, message="OpenCV +X row")
-        vec_close(row[4:7], (0.0, -1.0, 0.0), tol=1e-9, message="OpenCV +Y (down) row")
-        vec_close(row[8:11], (0.0, 0.0, 1.0), tol=1e-9, message="OpenCV +Z row")
+        right, up, back = row[0:3], row[4:7], row[8:11]
+        vec_close(right, (1.0, 0.0, 0.0), tol=1e-9, message="+X (right) row")
+        vec_close(up, (0.0, 1.0, 0.0), tol=1e-9, message="+Y (up) row")
+        vec_close(back, (0.0, 0.0, 1.0), tol=1e-9, message="+Z (back) row")
+
+        # A proper rotation, not a reflection: this is the invariant the export
+        # broke once (flipping only the Y row left det = -1, so a viewer that
+        # inverted the matrix drew a mirrored camera).
+        determinant = (
+            right[0] * (up[1] * back[2] - up[2] * back[1])
+            - up[0] * (right[1] * back[2] - right[2] * back[1])
+            + back[0] * (right[1] * up[2] - right[2] * up[1])
+        )
+        close(determinant, 1.0, tol=1e-9, message="det(R) must be +1 for a right-handed frame")
+
         # The defining invariant: the camera's own world position maps to the
         # camera-space origin.
         camera_position = (0.0, 0.0, -5.0)
         for axis in range(3):
             value = sum(row[axis * 4 + k] * camera_position[k] for k in range(3)) + row[axis * 4 + 3]
             close(value, 0.0, tol=1e-9, message=f"camera-space axis {axis} of the camera origin")
-        # Row 2 is the camera's `back` column (Blender local +Z), matching the
-        # reference implementation's `R^T` convention: a point IN FRONT of the
-        # camera gets positive z, a point behind it gets negative z.
-        front = (0.0, 0.0, 0.0)
-        depth = sum(row[8 + k] * front[k] for k in range(3)) + row[11]
-        close(depth, 5.0, tol=1e-9, message="5 units ahead of the camera")
-        behind = (0.0, 0.0, -10.0)
-        depth_behind = sum(row[8 + k] * behind[k] for k in range(3)) + row[11]
-        close(depth_behind, -5.0, tol=1e-9, message="5 units behind the camera")
+
+        # The camera looks down its local -Z (= world -Z here), so a point in front
+        # of it has NEGATIVE z in camera space and the view axis is -row2.  The
+        # world origin is 5 units *behind* this camera, hence z = +5.
+        behind = (0.0, 0.0, 0.0)
+        depth = sum(row[8 + k] * behind[k] for k in range(3)) + row[11]
+        close(depth, 5.0, tol=1e-9, message="the world origin is 5 units behind: z = +5")
+        front = (0.0, 0.0, -10.0)
+        depth_front = sum(row[8 + k] * front[k] for k in range(3)) + row[11]
+        close(depth_front, -5.0, tol=1e-9, message="5 units ahead of the camera: z = -5")
+
+    @suite.case("inverting the exported row reproduces the camera-to-world matrix")
+    def _():
+        # The round trip a viewer relies on (``inv(w2c)`` -> draw the frustum).
+        import math as _math
+
+        for angle, position in ((0.0, (1.0, 2.0, 3.0)),
+                                (37.0, (-2.5, 0.5, 1.6)),
+                                (-115.0, (4.0, -3.0, 0.75))):
+            quaternion = mt.quat_from_axis_angle("Z", angle)
+            matrix = ce.camera_pose_to_world_matrix(position, quaternion)
+            row = ce.world_to_camera_row(matrix)
+
+            # Invert the 3x4 the way a viewer does: R^T and -R^T t.
+            rotation = [[row[i * 4 + j] for j in range(3)] for i in range(3)]
+            translation = [row[i * 4 + 3] for i in range(3)]
+            centre = [
+                -sum(rotation[k][j] * translation[k] for k in range(3)) for j in range(3)
+            ]
+            vec_close(centre, position, tol=1e-9, message=f"camera centre at {angle} deg")
+
+            camera_to_world = [
+                [rotation[j][i] for j in range(3)] + [centre[i]] for i in range(3)
+            ]
+            for i in range(3):
+                for j in range(3):
+                    close(camera_to_world[i][j], matrix[i][j], tol=1e-9,
+                          message=f"inv(W2C) must be the camera-to-world matrix ({angle} deg)")
+
+            # The inverted third column is Blender's back axis, so the view
+            # direction (-column 2) must match the quaternion's.
+            view = [-camera_to_world[i][2] for i in range(3)]
+            vec_close(view, mt.quat_rotate(quaternion, (0.0, 0.0, -1.0)), tol=1e-9,
+                      message=f"view axis at {angle} deg")
+            up = [camera_to_world[i][1] for i in range(3)]
+            vec_close(up, mt.quat_rotate(quaternion, (0.0, 1.0, 0.0)), tol=1e-9,
+                      message=f"up axis at {angle} deg")
 
     @suite.case("world_to_camera_row matches a hand-computed lookup table")
     def _():
@@ -683,7 +734,7 @@ def build_suite() -> Suite:
         row = ce.world_to_camera_row(matrix)
         # Blender columns after rotation: right = (c, s, 0), up = (-s, c, 0), back = (0, 0, 1).
         vec_close(row[0:3], (cosine, sine, 0.0), tol=1e-9, message="right row")
-        vec_close(row[4:7], (sine, -cosine, 0.0), tol=1e-9, message="down row (negated up)")
+        vec_close(row[4:7], (-sine, cosine, 0.0), tol=1e-9, message="up row")
         vec_close(row[8:11], (0.0, 0.0, 1.0), tol=1e-9, message="back row")
         # Translation terms must satisfy -R^T c for each row axis.
         close(row[3], -(row[0] * centre[0] + row[1] * centre[1] + row[2] * centre[2]), tol=1e-9)
@@ -693,23 +744,23 @@ def build_suite() -> Suite:
             value = sum(row[axis * 4 + k] * centre[k] for k in range(3)) + row[axis * 4 + 3]
             close(value, 0.0, tol=1e-9, message=f"camera-space axis {axis} of the camera origin")
         # The camera's up axis is world -X here, so a point 5 units along world
-        # -X is 5 units towards the camera's UP direction: OpenCV y = -5.
+        # -X is 5 units towards the camera's UP direction: y = +5.
         target = (centre[0] - 5.0, centre[1], centre[2])
         camera_space = [
             sum(row[axis * 4 + k] * target[k] for k in range(3)) + row[axis * 4 + 3]
             for axis in range(3)
         ]
-        vec_close(camera_space, (0.0, -5.0, 0.0), tol=1e-9, message="5 units above the camera")
+        vec_close(camera_space, (0.0, 5.0, 0.0), tol=1e-9, message="5 units above the camera")
         # ... and a point 5 units along the camera's own BACK axis (+Z) is 5
-        # units in front, i.e. camera-space z = +5 with x = y = 0 (the reference
-        # `R^T` convention puts in-front points at positive z).
+        # units behind it, i.e. camera-space z = +5 with x = y = 0 (Blender looks
+        # down local -Z, so in-front points have negative z).
         behind = (centre[0], centre[1], centre[2] + 5.0)
         camera_space_back = [
             sum(row[axis * 4 + k] * behind[k] for k in range(3)) + row[axis * 4 + 3]
             for axis in range(3)
         ]
         vec_close(camera_space_back, (0.0, 0.0, 5.0), tol=1e-9,
-                  message="5 units in front of the camera")
+                  message="5 units behind the camera")
 
     @suite.case("trajectory rows honour mode, step and endpoints")
     def _():
@@ -743,7 +794,7 @@ def build_suite() -> Suite:
         close(float(fields[1]), 35.0)
         equal(fields[2:7], ["0"] * 5)
 
-    @suite.case("the txt rotation block is orthonormal and z-forward")
+    @suite.case("the txt rotation block is orthonormal and right-handed")
     def _():
         animation = _straight_animation((0, 0, 1.6), (0, 1, 1.6), frames=2)
         rows = ce.build_trajectory_rows(animation.samples)
@@ -759,6 +810,25 @@ def build_suite() -> Suite:
             for j in range(i + 1, 3):
                 dot = sum(entries[i][k] * entries[j][k] for k in range(3))
                 close(dot, 0.0, tol=1e-9, message=f"rows {i},{j} orthogonal")
+        # Orthonormal rows are not enough: a single-row sign flip keeps them
+        # orthonormal *and* unit length while turning the matrix into a mirror
+        # (det = -1), which is what made a viewer draw a mirrored camera.
+        cross = (
+            entries[0][1] * entries[1][2] - entries[0][2] * entries[1][1],
+            entries[0][2] * entries[1][0] - entries[0][0] * entries[1][2],
+            entries[0][0] * entries[1][1] - entries[0][1] * entries[1][0],
+        )
+        vec_close(cross, entries[2], tol=1e-9,
+                  message="row0 x row1 must equal row2 (right-handed, det = +1)")
+        # The rows are the camera's own axes: row1 is the camera's up, and the
+        # camera looks along -row2.
+        up = entries[1]
+        view = tuple(-value for value in entries[2])
+        quaternion = animation.samples[0].quaternion
+        vec_close(up, mt.quat_rotate(quaternion, (0.0, 1.0, 0.0)), tol=1e-9,
+                  message="row1 is the camera's up axis")
+        vec_close(view, mt.quat_rotate(quaternion, (0.0, 0.0, -1.0)), tol=1e-9,
+                  message="the view axis is -row2")
 
     @suite.case("sensor crop factor reflects Blender's AUTO fit rule")
     def _():
@@ -820,7 +890,7 @@ def build_suite() -> Suite:
         equal(len(entry["matrix"]), 4)
         equal(entry["matrix"][3], [0.0, 0.0, 0.0, 1.0])
         ok("fov" in entry and "focal_length" in entry)
-        equal(payload["trajectory_export"]["coordinate_system"], "opencv_world_to_camera")
+        equal(payload["trajectory_export"]["coordinate_system"], "blender_world_to_camera")
 
     @suite.case("validation report to_dict is JSON-serialisable")
     def _():

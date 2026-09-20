@@ -1,10 +1,11 @@
 """Motion template parser / animator tests (pure Python).
 
-The semantic assertions here are the important ones: whatever the axis mapping
-does internally, ``dolly_in`` must move the camera along its own view axis,
-``pan_right`` must rotate it to its right, ``pedestal_up`` must raise it, and
-``truck_right`` must strafe it right.  Those four cover the axis/sign contract
-described in the module docstring.
+The semantic assertions here are the important ones: templates are authored in
+**Blender coordinates** and used verbatim, so ``dolly_in`` must move the camera
+along its own view axis (``-Z``), ``pan_right`` must rotate it to its right,
+``pedestal_up`` must raise it (``+Y``) and ``truck_right`` must strafe it right
+(``+X``).  Those four cover the axis/sign contract described in the module
+docstring.
 """
 
 from __future__ import annotations
@@ -76,7 +77,7 @@ def build_suite() -> Suite:
     suite = Suite("test_motion_templates")
 
     # -- parsing ---------------------------------------------------------
-    @suite.case("parses the reference document (80 templates, [roll,pitch,yaw] keys)")
+    @suite.case("parses the reference document (80 templates, Blender coordinates)")
     def _():
         path = _reference_path()
         ok(bool(path), "reference template file must be discoverable")
@@ -89,7 +90,8 @@ def build_suite() -> Suite:
         equal(template.duration_frames, 80)
         equal(len(template.keyframes), 3)
         vec_close(template.keyframes[0].location, (0.0, 0.0, 0.0))
-        vec_close(template.keyframes[-1].location, (300.0, 0.0, 0.0))
+        # Blender coordinates: a forward dolly is -Z, in metres.
+        vec_close(template.keyframes[-1].location, (0.0, 0.0, -3.0))
         close(template.keyframes[0].focal, 35.0)
         ok("dolly_in" in template.name)
         ok(all(t.name for t in library), "every template has a name")
@@ -298,7 +300,7 @@ def build_suite() -> Suite:
         library = mt.MotionTemplateLibrary.from_entries(
             [{"id": "dolly_in", "keys": [
                 {"frame": 0, "location": [0, 0, 0], "rotation": [0, 0, 0]},
-                {"frame": 80, "location": [300, 0, 0], "rotation": [0, 0, 0]},
+                {"frame": 80, "location": [0, 0, -3.0], "rotation": [0, 0, 0]},
             ]}], source="semantics")
         generator = mt.MotionTemplateGenerator(frame_start=0)
         base = _look_neg_y()
@@ -308,14 +310,14 @@ def build_suite() -> Suite:
                   message="the probe camera must look along -Y for this test to mean anything")
         delta = mt.vec_sub(animation.samples[-1].position, animation.samples[0].position)
         vec_close(delta, mt.vec_scale(forward, 3.0), tol=1e-5,
-                  message="300 template units at 0.01 m/unit must be 3 m forward")
+                  message="3 m of local -Z must be a 3 m forward push")
         ok(delta[1] < 0, f"camera should move toward -Y, got {delta}")
 
     @suite.case("dolly_out reverses it")
     def _():
         library = mt.MotionTemplateLibrary.from_entries(
             [{"id": "dolly_out", "keys": [
-                {"frame": 0}, {"frame": 80, "location": [-300, 0, 0]},
+                {"frame": 0}, {"frame": 80, "location": [0, 0, 3.0]},
             ]}], source="semantics")
         base = _look_neg_y()
         forward = mt.axis_basis(base)[2]
@@ -323,16 +325,16 @@ def build_suite() -> Suite:
             library.get("dolly_out"), base_matrix=base, base_focal=35.0)
         delta = mt.vec_sub(animation.samples[-1].position, animation.samples[0].position)
         vec_close(delta, mt.vec_scale(forward, -3.0), tol=1e-5,
-                  message="-300 units must move 3 m backwards along the view axis")
+                  message="3 m of local +Z must move 3 m backwards along the view axis")
         close(delta[1], 3.0, tol=1e-5, message="backwards from -Y is +Y")
 
     @suite.case("pan_right turns the camera to its right, pan_left to its left")
     def _():
         library = mt.MotionTemplateLibrary.from_entries([
             {"id": "pan_right", "keys": [
-                {"frame": 0, "rotation": [0, 0, 0]}, {"frame": 80, "rotation": [0, 0, 30]}]},
+                {"frame": 0, "rotation": [0, 0, 0]}, {"frame": 80, "rotation": [0, -30, 0]}]},
             {"id": "pan_left", "keys": [
-                {"frame": 0, "rotation": [0, 0, 0]}, {"frame": 80, "rotation": [0, 0, -30]}]},
+                {"frame": 0, "rotation": [0, 0, 0]}, {"frame": 80, "rotation": [0, 30, 0]}]},
         ], source="semantics")
         generator = mt.MotionTemplateGenerator(frame_start=0)
         base = _look_neg_y()
@@ -357,7 +359,7 @@ def build_suite() -> Suite:
     @suite.case("roll rotates about the camera's own view axis, not a world axis")
     def _():
         library = mt.MotionTemplateLibrary.from_entries(
-            [{"id": "roll", "keys": [{"frame": 0}, {"frame": 80, "rotation": [20, 0, 0]}]}],
+            [{"id": "roll", "keys": [{"frame": 0}, {"frame": 80, "rotation": [0, 0, 20]}]}],
             source="semantics")
         base = _look_neg_y()
         right, up, forward = mt.axis_basis(base)
@@ -378,15 +380,15 @@ def build_suite() -> Suite:
     @suite.case("pedestal_up/down move along the camera's own up axis")
     def _():
         library = mt.MotionTemplateLibrary.from_entries([
-            {"id": "ped_up", "keys": [{"frame": 0}, {"frame": 80, "location": [0, 0, 120]}]},
-            {"id": "ped_down", "keys": [{"frame": 0}, {"frame": 80, "location": [0, 0, -35]}]},
+            {"id": "ped_up", "keys": [{"frame": 0}, {"frame": 80, "location": [0, 1.2, 0]}]},
+            {"id": "ped_down", "keys": [{"frame": 0}, {"frame": 80, "location": [0, -0.35, 0]}]},
         ], source="semantics")
         generator = mt.MotionTemplateGenerator(frame_start=0)
         base = _look_neg_y()
         _right, up, _forward = mt.axis_basis(base)
         animation = generator.generate(library.get("ped_up"), base_matrix=base, base_focal=35.0)
         delta = mt.vec_sub(animation.samples[-1].position, animation.samples[0].position)
-        vec_close(delta, mt.vec_scale(up, 1.2), tol=1e-5, message="120 units = 1.2 m up")
+        vec_close(delta, mt.vec_scale(up, 1.2), tol=1e-5, message="1.2 m of local +Y is up")
 
         down = generator.generate(library.get("ped_down"), base_matrix=base, base_focal=35.0)
         down_delta = mt.vec_sub(down.samples[-1].position, down.samples[0].position)
@@ -396,7 +398,7 @@ def build_suite() -> Suite:
     def _():
         library = mt.MotionTemplateLibrary.from_entries(
             [{"id": "truck_right", "keys": [
-                {"frame": 0}, {"frame": 80, "location": [0, 200, 0]}]}], source="semantics")
+                {"frame": 0}, {"frame": 80, "location": [2.0, 0, 0]}]}], source="semantics")
         base = _look_neg_y()
         right, _up, _forward = mt.axis_basis(base)
         animation = mt.MotionTemplateGenerator(frame_start=0).generate(
@@ -404,11 +406,11 @@ def build_suite() -> Suite:
         delta = mt.vec_sub(animation.samples[-1].position, animation.samples[0].position)
         vec_close(delta, mt.vec_scale(right, 2.0), tol=1e-5)
 
-    @suite.case("tilt_up pitches the camera up (positive pitch looks up)")
+    @suite.case("tilt_up pitches the camera up (positive rx looks up)")
     def _():
         library = mt.MotionTemplateLibrary.from_entries([
-            {"id": "tilt_up", "keys": [{"frame": 0}, {"frame": 80, "rotation": [0, 20, 0]}]},
-            {"id": "tilt_down", "keys": [{"frame": 0}, {"frame": 80, "rotation": [0, -20, 0]}]},
+            {"id": "tilt_up", "keys": [{"frame": 0}, {"frame": 80, "rotation": [20, 0, 0]}]},
+            {"id": "tilt_down", "keys": [{"frame": 0}, {"frame": 80, "rotation": [-20, 0, 0]}]},
         ], source="semantics")
         generator = mt.MotionTemplateGenerator(frame_start=0)
         base = _look_neg_y()
@@ -419,26 +421,29 @@ def build_suite() -> Suite:
         end_down = mt.quat_rotate(down_animation.samples[-1].quaternion, (0, 0, -1))
         ok(end_down[2] < -0.2, f"tilt_down should lower the aim, got {end_down}")
 
-    @suite.case("zoom_in shortens the focal length, zoom_out lengthens it")
+    @suite.case("zoom_in lengthens the focal length, zoom_out shortens it")
     def _():
+        # "Zoom in" tightens the framing, which is a *longer* lens -- the reference
+        # document's zoom_in goes 24 mm -> 70 mm and probe_template_contract.py
+        # asserts that direction on every generated sequence.
         library = mt.MotionTemplateLibrary.from_entries([
-            {"id": "zoom_in", "keys": [{"frame": 0, "focal": 85}, {"frame": 80, "focal": 24}]},
-            {"id": "zoom_out", "keys": [{"frame": 0, "focal": 24}, {"frame": 80, "focal": 85}]},
+            {"id": "zoom_in", "keys": [{"frame": 0, "focal": 24}, {"frame": 80, "focal": 85}]},
+            {"id": "zoom_out", "keys": [{"frame": 0, "focal": 85}, {"frame": 80, "focal": 24}]},
         ], source="semantics")
         generator = mt.MotionTemplateGenerator(frame_start=0)
         base = _look_neg_y()
         zoom_in = generator.generate(library.get("zoom_in"), base_matrix=base, base_focal=50.0)
-        close(zoom_in.samples[0].focal, 85.0)
-        close(zoom_in.samples[-1].focal, 24.0)
+        close(zoom_in.samples[0].focal, 24.0)
+        close(zoom_in.samples[-1].focal, 85.0)
         close(zoom_in.samples[40].focal, 54.5, tol=0.6, message="linear focal ramp")
         zoom_out = generator.generate(library.get("zoom_out"), base_matrix=base, base_focal=50.0)
-        close(zoom_out.samples[0].focal, 24.0)
-        close(zoom_out.samples[-1].focal, 85.0)
+        close(zoom_out.samples[0].focal, 85.0)
+        close(zoom_out.samples[-1].focal, 24.0)
 
     @suite.case("a template without focals keeps the camera's original lens")
     def _():
         library = mt.MotionTemplateLibrary.from_entries(
-            [{"id": "no_focal", "keys": [{"frame": 0}, {"frame": 30, "location": [10, 0, 0]}]}],
+            [{"id": "no_focal", "keys": [{"frame": 0}, {"frame": 30, "location": [0.1, 0, 0]}]}],
             source="semantics")
         animation = mt.MotionTemplateGenerator(frame_start=0).generate(
             library.get("no_focal"), base_matrix=_look_neg_y(), base_focal=42.0)
@@ -462,26 +467,68 @@ def build_suite() -> Suite:
         equal(explicit.frame_end, 104)
         equal(len(explicit.samples), 5)
 
-    @suite.case("unit scale sign/axis overrides change the result predictably")
+    @suite.case("template numbers are used verbatim: no axis swap, no rescaling")
+    def _():
+        # The whole point of the Blender-native contract.  Whatever a template says
+        # is what the camera does: 1.5 m of -Z is 1.5 m along the view axis, and
+        # the offset components map to the camera's own right/up/back axes.
+        library = mt.MotionTemplateLibrary.from_entries(
+            [{"id": "raw", "keys": [{"frame": 0}, {"frame": 80, "location": [1.5, 2.5, -3.5]}]}],
+            source="verbatim")
+        base = _look_neg_y()
+        right, up, forward = mt.axis_basis(base)
+        back = mt.vec_scale(forward, -1.0)
+        generator = mt.MotionTemplateGenerator(frame_start=0)
+        equal(generator.local_offset([1.5, 2.5, -3.5]), (1.5, 2.5, -3.5))
+        equal(generator.local_offset([1]), (1.0, 0.0, 0.0),
+              "a short vector is padded with zeros, never rescaled")
+        animation = generator.generate(library.get("raw"), base_matrix=base, base_focal=35.0)
+        delta = mt.vec_sub(animation.samples[-1].position, animation.samples[0].position)
+        vec_close(delta, mt.vec_add(mt.vec_add(mt.vec_scale(right, 1.5), mt.vec_scale(up, 2.5)),
+                                    mt.vec_scale(back, -3.5)), tol=1e-5)
+        # -3.5 on the back axis is 3.5 m along the camera's own view direction.
+        close(sum(a * b for a, b in zip(delta, forward)), 3.5, tol=1e-5)
+
+    @suite.case("rotation is camera-local degrees, composed in rotation_order")
     def _():
         library = mt.MotionTemplateLibrary.from_entries(
-            [{"id": "dolly", "keys": [{"frame": 0}, {"frame": 80, "location": [300, 0, 0]}]}],
-            source="semantics")
+            [{"id": "spin", "keys": [{"frame": 0}, {"frame": 80, "rotation": [10, 20, 30]}]}],
+            source="verbatim")
         base = _look_neg_y()
-        forward = mt.axis_basis(base)[2]
-        # Flipping location_forward turns the same template into a backward move.
-        flipped = TemplateUnitScale(location_forward=1.0)
-        animation = mt.MotionTemplateGenerator(unit_scale=flipped, frame_start=0).generate(
-            library.get("dolly"), base_matrix=base, base_focal=35.0)
-        delta = mt.vec_sub(animation.samples[-1].position, animation.samples[0].position)
-        vec_close(delta, mt.vec_scale(forward, -3.0), tol=1e-5,
-                  message="location_forward=1 must invert the dolly direction")
-        # location_scale=1 switches the unit interpretation from cm to m.
-        metric = TemplateUnitScale(location_scale=1.0)
-        animation_m = mt.MotionTemplateGenerator(unit_scale=metric, frame_start=0).generate(
-            library.get("dolly"), base_matrix=base, base_focal=35.0)
-        delta_m = mt.vec_sub(animation_m.samples[-1].position, animation_m.samples[0].position)
-        vec_close(delta_m, mt.vec_scale(forward, 300.0), tol=1e-3)
+        generator = mt.MotionTemplateGenerator(frame_start=0)
+        animation = generator.generate(library.get("spin"), base_matrix=base, base_focal=35.0)
+        # ``rotation_delta`` is exactly the local Euler rotation, order XYZ.
+        expected = (1.0, 0.0, 0.0, 0.0)
+        for axis, degrees in (("X", 10.0), ("Y", 20.0), ("Z", 30.0)):
+            expected = mt.quat_normalize(mt.quat_multiply(
+                mt.quat_from_axis_angle(axis, degrees), expected))
+        close(mt.quat_angle_between(generator.rotation_delta([10, 20, 30]), expected), 0.0,
+              tol=1e-9, message="XYZ must apply X first, like Blender's own Euler order")
+        # Composed inside the base orientation, so the base aim is preserved.
+        start_dir = mt.quat_rotate(animation.samples[0].quaternion, (0, 0, -1))
+        vec_close(start_dir, mt.axis_basis(base)[2], tol=1e-9)
+        # ... and a different order gives a different (but still local) rotation.
+        other = mt.MotionTemplateGenerator(
+            unit_scale=TemplateUnitScale(rotation_order="ZYX"), frame_start=0)
+        ok(mt.quat_angle_between(other.rotation_delta([10, 20, 30]),
+                                 generator.rotation_delta([10, 20, 30])) > 1.0,
+           "rotation_order must change the composition")
+
+    @suite.case("legacy Unreal unit-scale keys warn and are ignored")
+    def _():
+        warnings: "list[str]" = []
+        scale = TemplateUnitScale.from_dict(
+            {"location_scale": 0.01, "yaw_sign": -1.0, "location_forward": -1.0, "fps": 30.0},
+            warnings)
+        equal(len(warnings), 1, warnings)
+        warning = warnings[0]
+        ok("location_scale" in warning and "yaw_sign" in warning, warning)
+        ok("migrate_unreal_templates.py" in warning, warning)
+        # Only the timeline settings survive; nothing rescales a location any more.
+        close(scale.fps, 30.0)
+        equal(scale.rotation_order, "XYZ")
+        legacy = [name for name in TemplateUnitScale.REMOVED_KEYS if hasattr(scale, name)]
+        equal(legacy, [], "the Unreal mapping fields must be gone, not merely unused")
 
     @suite.case("the original camera orientation is preserved exactly at frame 0")
     def _():

@@ -141,6 +141,21 @@ def assert_object_parenting(camera_obj) -> None:
 # --------------------------------------------------------------------------
 # data
 # --------------------------------------------------------------------------
+def _is_compound(template) -> bool:
+    """True when *template* was flattened from a compound recipe."""
+    parameters = getattr(template, "parameters", None) or {}
+    return isinstance(parameters.get("compound"), dict)
+
+
+def compound_parts(template) -> "list[str]":
+    """The ordered base template names behind a compound template ([] otherwise)."""
+    parameters = getattr(template, "parameters", None) or {}
+    block = parameters.get("compound")
+    if isinstance(block, dict):
+        return [str(name) for name in (block.get("parts") or [])]
+    return []
+
+
 @dataclass
 class SequenceRequest:
     """Everything that identifies one output sequence."""
@@ -324,13 +339,25 @@ class SequenceGenerator:
         ``scene/motion/`` directory is self-contained: its manifest, its
         sequence ids and its numbering all agree, and a partial re-run of one
         motion never renumbers another motion's sequences.
+
+        Compound ("复合") recipes are expanded into ordinary templates first, so a
+        compound sequence is just another motion folder here -- validation, search,
+        baking and rendering need to know nothing about it.
         """
         from ..io.path_utils import safe_filename
 
         scene_name = scene_name_for(scene_entry, self.config.batch.scene_name_mode)
         requests: "list[SequenceRequest]" = []
         del start_index  # numbering is per motion folder, not global
-        for template in library:
+        templates = list(library)
+        composite = getattr(self.config, "composite", None)
+        if composite is not None and composite.want_compound():
+            templates = templates + self._compound_templates(library)
+        if composite is not None and not composite.want_base():
+            # ``only_compound``: drop the single-template requests, keep the compounds.
+            templates = [t for t in templates if _is_compound(t)]
+
+        for template in templates:
             motion_name = safe_filename(template.name, fallback="motion")
             index = 1
             for camera_name in cameras:
@@ -349,6 +376,36 @@ class SequenceGenerator:
                     ))
                     index += 1
         return requests
+
+    def _compound_templates(self, library) -> "list[MotionTemplate]":
+        """Flatten the configured compound recipes into ordinary templates."""
+        from ..camera.motion_composite import build_compound_templates
+
+        composite = self.config.composite
+        templates, warnings = build_compound_templates(
+            library,
+            mode=composite.mode,
+            types_per_sequence=composite.types_per_sequence,
+            sequence_count=composite.sequence_count,
+            seed=composite.seed,
+            max_full_sequences=composite.max_full_sequences,
+            max_partial_sequences=composite.max_partial_sequences,
+            frame_start=self.motion.frame_start,
+            frame_end=self.motion.frame_end,
+            interpolation=self.motion.interpolation,
+            rotation_order=self.unit_scale.rotation_order,
+            logger=self.logger,
+        )
+        for warning in warnings:
+            self.notes.append(warning)
+            if self.logger is not None:
+                self.logger.warning("composite: %s", warning)
+        if templates and self.logger is not None:
+            self.logger.info(
+                "composite: %d compound shot(s) ready (%s, seed=%s)",
+                len(templates), composite.mode, composite.seed,
+            )
+        return templates
 
     def generate(self, request: SequenceRequest) -> SequenceResult:
         """Generate (or skip) one sequence."""
@@ -1036,8 +1093,9 @@ class SequenceGenerator:
                 f"sequence_id={sequence_id}",
                 f"scene={request.scene_name} motion={request.motion_name} camera={camera.name}",
                 f"frames={animation.frame_start}..{animation.frame_end} fps={animation.fps:g}",
-                f"coordinate_system=opencv_world_to_camera units=blender_world_units "
-                f"rotation=3x3_rotation_matrix",
+                f"coordinate_system=blender_world_to_camera units=blender_world_units "
+                f"rotation=3x3_rotation_matrix rows_are_camera_axes=+X_right,+Y_up,+Z_back "
+                f"view_axis=-Z",
                 f"generator=blender_motion_pipeline {GENERATOR_VERSION}",
             ],
         )

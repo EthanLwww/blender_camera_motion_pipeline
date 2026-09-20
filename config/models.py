@@ -208,74 +208,70 @@ def _sub_dict(raw: dict, key: str, warnings: "list[str]") -> dict:
 # --------------------------------------------------------------------------
 @dataclass
 class TemplateUnitScale:
-    """Mapping between template space (Unreal-ish) and Blender scene units.
+    """Timeline settings for templates.  There is **no** coordinate conversion.
 
-    The reference ``camera_motion_templates.json`` stores offsets in
-    centimetres and rotations in degrees using Unreal's ``[roll, pitch, yaw]``
-    order, with local axes ``X`` forward, ``Y`` right, ``Z`` up.  Blender
-    cameras look down local ``-Z`` with ``+X`` right and ``+Y`` up, so the
-    default sign set below reproduces the intended camera move.
+    Templates are authored in **Blender coordinates**: ``location`` is an offset in
+    the camera's own frame in metres (``+X`` right, ``+Y`` up, ``-Z`` forward) and
+    ``rotation`` is degrees about the camera's own axes.  Nothing is rescaled, no
+    axis is swapped and no sign is flipped, so a template's numbers are exactly the
+    numbers Blender uses.
+
+    This class used to carry the Unreal -> Blender mapping (``location_scale``,
+    ``location_forward/right/up``, ``yaw/pitch/roll_axis`` and their signs).  Those
+    keys are gone on purpose: a config that still sets them gets one warning naming
+    the migration script, and the values are ignored.
     """
 
-    location_scale: float = 0.01        # centimetres -> metres
     fps: float = 24.0
+    #: Order the three local rotation components are applied in (Blender's own
+    #: ``Euler`` orders; ``XYZ`` applies X first).
     rotation_order: str = "XYZ"
-    #: World axis the template yaw turns about.
-    yaw_axis: str = "Z"
-    #: Local axis the template pitch tilts about.
-    pitch_axis: str = "X"
-    #: Local axis the template roll spins about.  Roll spins the frame about the
-    #: camera's *view* axis; a Blender camera looks down local ``-Z``, so that is
-    #: the camera's local ``Z`` -- using ``Y`` here silently turns every
-    #: ``roll_*`` template into a pitch.
-    roll_axis: str = "Z"
-    yaw_sign: float = -1.0              # Unreal +yaw turns right; Blender is -Z
-    pitch_sign: float = 1.0
-    roll_sign: float = -1.0
-    location_forward: float = -1.0      # Unreal +X = forward = Blender -Z
-    location_right: float = 1.0         # Unreal +Y = right  = Blender +X
-    location_up: float = 1.0            # Unreal +Z = up     = Blender +Y
 
     ROTATION_ORDERS = ("XYZ", "XZY", "YXZ", "YZX", "ZXY", "ZYX")
     AXES = ("X", "Y", "Z")
 
+    #: Keys from the Unreal-coordinate era; accepted-but-ignored, with a warning.
+    REMOVED_KEYS = (
+        "location_scale",
+        "location_forward",
+        "location_right",
+        "location_up",
+        "yaw_axis",
+        "pitch_axis",
+        "roll_axis",
+        "yaw_sign",
+        "pitch_sign",
+        "roll_sign",
+    )
+
     @classmethod
     def from_dict(cls, raw: dict, warnings: "list[str]", owner: str = "motion.unit_scale"):
         raw = dict(raw or {})
+        legacy = sorted(key for key in cls.REMOVED_KEYS if key in raw)
+        for key in legacy:
+            raw.pop(key, None)
         instance = cls(
-            location_scale=_read_typed(raw, "location_scale", float, 0.01, warnings),
             fps=_read_typed(raw, "fps", float, 24.0, warnings),
             rotation_order=_read_choice(raw, "rotation_order", cls.ROTATION_ORDERS, "XYZ", warnings),
-            yaw_axis=_read_choice(raw, "yaw_axis", cls.AXES, "Z", warnings),
-            pitch_axis=_read_choice(raw, "pitch_axis", cls.AXES, "X", warnings),
-            roll_axis=_read_choice(raw, "roll_axis", cls.AXES, "Z", warnings),
-            yaw_sign=_read_typed(raw, "yaw_sign", float, -1.0, warnings),
-            pitch_sign=_read_typed(raw, "pitch_sign", float, 1.0, warnings),
-            roll_sign=_read_typed(raw, "roll_sign", float, -1.0, warnings),
-            location_forward=_read_typed(raw, "location_forward", float, -1.0, warnings),
-            location_right=_read_typed(raw, "location_right", float, 1.0, warnings),
-            location_up=_read_typed(raw, "location_up", float, 1.0, warnings),
         )
         _report_unknown(raw, owner, warnings)
+        if legacy:
+            warnings.append(
+                f"{owner}: {', '.join(legacy)} no longer do anything -- templates are "
+                "authored in Blender coordinates now (metres, +X right / +Y up / -Z "
+                "forward, local degrees). Convert an Unreal-coordinate set once with "
+                "'python tests/migrate_unreal_templates.py --input <file>'."
+            )
         instance.validate()
         return instance
 
     def validate(self) -> None:
-        # ``yaw_axis`` names the WORLD axis yaw turns about; ``pitch_axis`` and
-        # ``roll_axis`` name LOCAL axes, so they must differ from each other
-        # (pitch tilts, roll spins) but may coincide with the world yaw axis.
-        if self.pitch_axis == self.roll_axis:
-            raise ConfigError(
-                "motion.unit_scale.pitch_axis and roll_axis must be different axes "
-                "(pitch tilts the aim, roll spins the frame)"
-            )
-        if self.location_scale <= 0:
-            raise ConfigError("motion.unit_scale.location_scale must be > 0")
         if self.fps <= 0:
             raise ConfigError("motion.unit_scale.fps must be > 0")
-        for name in ("location_forward", "location_right", "location_up"):
-            if getattr(self, name) not in (-1.0, 0.0, 1.0):
-                raise ConfigError(f"motion.unit_scale.{name} must be -1, 0 or 1")
+        if self.rotation_order not in self.ROTATION_ORDERS:
+            raise ConfigError(
+                f"motion.unit_scale.rotation_order must be one of {self.ROTATION_ORDERS}"
+            )
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -661,6 +657,92 @@ def _section_from_dict(section_cls, raw: dict, base, warnings: "list[str]"):
 
 
 @dataclass
+class CompositeSection:
+    """Compound shots: base templates played one after another in one sequence.
+
+    A compound keeps the **same total frame range** as a single template and only
+    concatenates the order, so ``pan_right + hitchcock`` is still 0..80 frames: the
+    range is split into windows, one per part, and each part starts where the
+    previous one ended.
+
+    * ``mode = "full"``: every ordering of every loaded template -- ``n!`` sequences.
+    * ``mode = "partial"``: ``types_per_sequence`` distinct templates per sequence,
+      ``sequence_count`` of them, drawn deterministically from the
+      ``x! * C(n, x)`` possible orderings.
+    * ``output_mode``: whether compounds are generated next to the base shots, on
+      their own, or whether only the base shots are generated.
+    """
+
+    enabled: bool = False
+    mode: str = "full"
+    #: x -- how many distinct templates one compound sequence contains (2..10).
+    types_per_sequence: int = 2
+    #: How many distinct compounds a partial compound should produce.
+    sequence_count: int = 12
+    #: Seeded so a re-run (and ``--resume``) reproduces the same set.
+    seed: int = 1234
+    output_mode: str = "with_base"
+    #: Safety rails: ``n!`` and ``x! * C(n, x)`` grow far too fast to generate
+    #: blindly (80! is not a number of sequences anyone can render).
+    max_full_sequences: int = 5040          # 7! -- enough for an 7-template set
+    max_partial_sequences: int = 100000
+
+    MAX_TYPES_PER_SEQUENCE = 10
+
+    @classmethod
+    def from_dict(cls, raw: dict, warnings: "list[str]"):
+        raw = dict(raw or {})
+        instance = cls(
+            enabled=_read_typed(raw, "enabled", bool, False, warnings),
+            mode=_read_choice(raw, "mode", ("full", "partial"), "full", warnings),
+            types_per_sequence=_read_typed(raw, "types_per_sequence", int, 2, warnings),
+            sequence_count=_read_typed(raw, "sequence_count", int, 12, warnings),
+            seed=_read_typed(raw, "seed", int, 1234, warnings),
+            output_mode=_read_choice(
+                raw, "output_mode", ("with_base", "only_compound", "only_base"),
+                "with_base", warnings,
+            ),
+            max_full_sequences=_read_typed(raw, "max_full_sequences", int, 5040, warnings),
+            max_partial_sequences=_read_typed(
+                raw, "max_partial_sequences", int, 100000, warnings
+            ),
+        )
+        _report_unknown(raw, "composite", warnings)
+        instance.validate()
+        return instance
+
+    def validate(self) -> None:
+        if self.mode not in ("full", "partial"):
+            raise ConfigError("composite.mode must be 'full' or 'partial'")
+        if self.output_mode not in ("with_base", "only_compound", "only_base"):
+            raise ConfigError(
+                "composite.output_mode must be 'with_base', 'only_compound' or 'only_base'"
+            )
+        if not 2 <= int(self.types_per_sequence) <= self.MAX_TYPES_PER_SEQUENCE:
+            raise ConfigError(
+                f"composite.types_per_sequence must be between 2 and "
+                f"{self.MAX_TYPES_PER_SEQUENCE}"
+            )
+        if int(self.sequence_count) < 1:
+            raise ConfigError("composite.sequence_count must be >= 1")
+        if int(self.max_full_sequences) < 1:
+            raise ConfigError("composite.max_full_sequences must be >= 1")
+        if int(self.max_partial_sequences) < 1:
+            raise ConfigError("composite.max_partial_sequences must be >= 1")
+
+    def want_base(self) -> bool:
+        """Should the run generate the plain, single-template sequences?"""
+        return not (self.enabled and self.output_mode == "only_compound")
+
+    def want_compound(self) -> bool:
+        """Should the run generate compound sequences?"""
+        return bool(self.enabled) and self.output_mode != "only_base"
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
 class BatchConfig:
     """Whole-run configuration."""
 
@@ -670,6 +752,7 @@ class BatchConfig:
     validation: ValidationSection = field(default_factory=ValidationSection)
     search: SearchSection = field(default_factory=SearchSection)
     render: RenderSection = field(default_factory=RenderSection)
+    composite: CompositeSection = field(default_factory=CompositeSection)
     scenes: list = field(default_factory=list)
     warnings: list = field(default_factory=list)
 
@@ -681,6 +764,7 @@ class BatchConfig:
             "validation": self.validation.to_dict(),
             "search": self.search.to_dict(),
             "render": self.render.to_dict(),
+            "composite": self.composite.to_dict(),
         }
         if include_scenes:
             payload["scenes"] = list(self.scenes)
@@ -721,6 +805,7 @@ class BatchConfig:
         validation_raw = _sub_dict(source, "validation", warnings)
         search_raw = _sub_dict(source, "search", warnings)
         render_raw = _sub_dict(source, "render", warnings)
+        composite_raw = _sub_dict(source, "composite", warnings)
         scenes_raw = _read_list(source, "scenes", instance.scenes, warnings)
 
         if batch_raw:
@@ -735,6 +820,10 @@ class BatchConfig:
             instance.search = _section_from_dict(SearchSection, search_raw, section_base.search, warnings)
         if render_raw:
             instance.render = _section_from_dict(RenderSection, render_raw, section_base.render, warnings)
+        if composite_raw:
+            instance.composite = _section_from_dict(
+                CompositeSection, composite_raw, section_base.composite, warnings
+            )
         instance.scenes = scenes_raw
         _report_unknown(source, "config", warnings)
         # De-duplicate: re-parsing a section re-emits warnings from its base.
@@ -781,6 +870,7 @@ def validate_batch_config(config: BatchConfig, *, require_output: bool = True) -
         config.search.validate()
         config.render.validate()
         config.motion.unit_scale.validate()
+        config.composite.validate()
     except ConfigError as exc:
         problems.append(str(exc))
     for index, scene in enumerate(config.scenes):
@@ -800,13 +890,22 @@ def describe_config(config: BatchConfig) -> str:
         f"  selected={config.motion.template_names or 'all'}",
         f"frame start    : {config.motion.frame_start}  scale={config.motion.frame_scale}"
         f"  interp={config.motion.interpolation}",
-        f"unit scale     : {config.motion.unit_scale.location_scale} m/unit, fps={config.motion.unit_scale.fps}",
+        f"template space : Blender (metres, +X right / +Y up / -Z forward, local degrees)"
+        f"  fps={config.motion.unit_scale.fps} order={config.motion.unit_scale.rotation_order}",
         f"validation     : enabled={config.validation.enabled} step={config.validation.sample_step}"
         f" clearance={config.validation.clearance}",
         f"camera search  : enabled={config.search.enabled} r=[{config.search.min_radius}, {config.search.max_radius}]"
         f" candidates={config.search.candidate_count} seed={config.search.random_seed}",
         f"render         : {config.render.engine} {config.render.resolution_x}x{config.render.resolution_y}"
         f" @{config.render.fps}fps -> {config.render.video_format}",
+        (
+            "composite      : enabled"
+            f" mode={config.composite.mode}"
+            + (f" x={config.composite.types_per_sequence} count={config.composite.sequence_count}"
+               if config.composite.mode == "partial" else "")
+            + f" output={config.composite.output_mode} seed={config.composite.seed}"
+            if config.composite.enabled else "composite      : off"
+        ),
         f"scenes         : {len(config.scenes)}",
     ]
     for warning in config.warnings:

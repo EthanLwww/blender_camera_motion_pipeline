@@ -254,6 +254,15 @@ def build_suite() -> Suite:
         finally:
             defaults.TEMPLATE_DIR_CANDIDATES = original
 
+        # The bundled documents live in the package's own ``templates/`` folder;
+        # ``config/`` is only a legacy probe for installs upgraded in place.
+        equal(os.path.basename(defaults.BUNDLED_DIRS[0]), "templates")
+        ok(os.path.isfile(os.path.join(defaults.BUNDLED_DIRS[0],
+                                       "camera_motion_templates.json")),
+           f"the dedicated folder must ship the document: {defaults.BUNDLED_DIRS[0]}")
+        ok(all(os.path.isdir(directory) for directory in defaults.BUNDLED_DIRS),
+           defaults.BUNDLED_DIRS)
+
     @suite.case("registering does not clobber existing panel settings")
     def _():
         import bpy

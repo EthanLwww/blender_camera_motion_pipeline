@@ -36,6 +36,7 @@ SUITES = (
     ("test_config", "pure"),
     ("test_project_layout", "pure"),
     ("test_motion_templates", "pure"),
+    ("test_motion_composite", "pure"),
     ("test_camera_validation", "pure"),
     ("test_animation_api", "blender"),
     ("test_addon_lifecycle", "blender"),

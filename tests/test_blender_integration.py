@@ -64,6 +64,8 @@ TEMPLATE_PATH = os.path.join(WORK, "templates.json")
 
 #: A tiny, self-contained template document.  Deliberately not the 80-entry
 #: reference file so the tests stay fast and independent of the artist's copy.
+#: Values are Blender coordinates (metres in the camera's own frame): ``-Z`` is
+#: forward, so ``push_in`` is a 0.8 m push and ``pan_swing`` turns right.
 TEMPLATES = [
     {"id": "still", "keys": [
         {"frame": 0, "location": [0, 0, 0], "rotation": [0, 0, 0], "focal": 35},
@@ -72,18 +74,18 @@ TEMPLATES = [
     ]},
     {"id": "push_in", "keys": [
         {"frame": 0, "location": [0, 0, 0], "rotation": [0, 0, 0], "focal": 35},
-        {"frame": 4, "location": [40, 0, 0], "rotation": [0, 0, 0], "focal": 35},
-        {"frame": 8, "location": [80, 0, 0], "rotation": [0, 0, 0], "focal": 35},
+        {"frame": 4, "location": [0, 0, -0.4], "rotation": [0, 0, 0], "focal": 35},
+        {"frame": 8, "location": [0, 0, -0.8], "rotation": [0, 0, 0], "focal": 35},
     ]},
     {"id": "pan_swing", "keys": [
         {"frame": 0, "location": [0, 0, 0], "rotation": [0, 0, 0], "focal": 35},
-        {"frame": 8, "location": [0, 0, 0], "rotation": [0, 0, 30], "focal": 35},
+        {"frame": 8, "location": [0, 0, 0], "rotation": [0, -30, 0], "focal": 35},
     ]},
     # Pushes 4 m along the camera's own view axis, straight through the wall
     # that ``blocked.blend`` puts in front of the camera.
     {"id": "through_wall", "keys": [
         {"frame": 0, "location": [0, 0, 0], "rotation": [0, 0, 0], "focal": 35},
-        {"frame": 8, "location": [400, 0, 0], "rotation": [0, 0, 0], "focal": 35},
+        {"frame": 8, "location": [0, 0, -4.0], "rotation": [0, 0, 0], "focal": 35},
     ]},
 ]
 
@@ -725,6 +727,170 @@ def build_suite() -> Suite:
         ok(os.path.isfile(os.path.join(OUT_DIR, "basic", "manifest.json")), "root manifest")
         ok(os.path.isfile(os.path.join(OUT_DIR, "basic", "batch_report.json")), "batch report")
 
+    @suite.case("every generated sequence matches its template's Blender numbers")
+    def _():
+        # The contract check that used to be spread over hand-made fixtures: read the
+        # recorded world poses back and compare them with the template's own numbers.
+        # ``probe_template_contract.py`` runs this over a whole tree (and over the
+        # 80-template reference set); here it guards the fixture sequences.
+        from blender_motion_pipeline.camera import motion_templates as mt
+        from blender_motion_pipeline.tests import probe_template_contract as contract
+
+        library = mt.load_template_file(TEMPLATE_PATH)
+        checked = 0
+        problems: "list[str]" = []
+        for motion in ("still", "push_in", "pan_swing", "through_wall"):
+            directory = os.path.join(OUT_DIR, "basic", "single", motion, "sequence_000001")
+            sidecar_path = os.path.join(directory, "sequence_000001.json")
+            if not os.path.isfile(sidecar_path):
+                continue
+            sidecar = load_json_file(sidecar_path)
+            problems.extend(contract.check_sequence(
+                (sidecar.get("motion") or {}).get("samples") or [],
+                library.get(motion),
+            ))
+            checked += 1
+        ok(checked >= 2, f"expected the fixture sequences, checked {checked}")
+        equal(problems, [], "template contract violations")
+
+        # Negative control: the check must notice a camera that drifted off the
+        # template's numbers, or it would pass on anything.
+        sidecar_path = os.path.join(OUT_DIR, "basic", "single", "push_in", "sequence_000001",
+                                    "sequence_000001.json")
+        sidecar = load_json_file(sidecar_path)
+        samples = (sidecar.get("motion") or {}).get("samples") or []
+        samples[-1]["location"] = [samples[-1]["location"][0] + 0.05,
+                                   samples[-1]["location"][1],
+                                   samples[-1]["location"][2]]
+        detected = contract.check_sequence(samples, library.get("push_in"))
+        ok(any("moved" in problem for problem in detected),
+           f"a 5 cm drift must be reported, got {detected}")
+
+    @suite.case("compound shots concatenate templates inside the same frame range")
+    def _():
+        import math
+
+        from blender_motion_pipeline.camera.motion_templates import quat_angle_between
+        from blender_motion_pipeline.core.batch_runner import BatchRunner
+
+        root = os.path.join(OUT_DIR, "compound")
+        names = ["still", "push_in", "pan_swing"]
+        config = make_config(root, names=names)
+        config.composite.enabled = True
+        config.composite.mode = "full"
+        report = BatchRunner(config, output_root=root,
+                             scene_entries=[SceneEntry(path=state["single"])]).run()
+        ok(report.ok, report.summary_text())
+        equal(report.generated, 3 + 6, "three base shots plus 3! compounds")
+
+        tree = os.path.join(root, "single")
+        folders = sorted(name for name in os.listdir(tree)
+                         if os.path.isdir(os.path.join(tree, name)))
+        compounds = [name for name in folders if name.startswith("compound_")]
+        equal(len(compounds), 6, folders)
+        equal([name for name in folders if not name.startswith("compound_")], sorted(names))
+
+        base_frames = load_json_file(os.path.join(tree, "still", "sequence_000001",
+                                                  "sequence_config.json"))["frames"]
+        for name in compounds:
+            folder = os.path.join(tree, name, "sequence_000001")
+            recorded = load_json_file(os.path.join(folder, "sequence_config.json"))
+            for key in ("frame_start", "frame_end", "frame_count"):
+                equal(recorded["frames"][key], base_frames[key],
+                      f"{name}: a compound must keep the single-template frame range")
+            block = recorded["motion"]["parameters"]["compound"]
+            equal(block["parts"], name[len("compound_"):].split("+"),
+                  "the folder name lists the parts in order")
+            equal(block["windows"][0][0], base_frames["frame_start"])
+            equal(block["windows"][-1][1], base_frames["frame_end"])
+            equal(len(block["windows"]), 3)
+
+        # The parts must be *chained*: each one starts where the previous ended, so
+        # there is no cut-sized step at a junction (a broken chain shows up as the
+        # full length of a part -- 0.8 m here -- or the whole 30 deg turn).
+        sidecar = load_json_file(os.path.join(tree, compounds[0], "sequence_000001",
+                                              "sequence_000001.json"))
+        samples = sidecar["motion"]["samples"]
+        worst_move = max(math.dist(a["location"], b["location"])
+                         for a, b in zip(samples, samples[1:]))
+        worst_turn = max(quat_angle_between(a["rotation_quaternion"], b["rotation_quaternion"])
+                         for a, b in zip(samples, samples[1:]))
+        ok(worst_move < 0.6, f"a compound must move smoothly through its junctions ({worst_move})")
+        ok(worst_turn < 20.0, f"a compound must turn smoothly through its junctions ({worst_turn})")
+        # ... and it really does both parts: the pan turns, the push travels.
+        equal(len(samples), base_frames["frame_count"])
+        moved = math.dist(samples[0]["location"], samples[-1]["location"])
+        turned = quat_angle_between(samples[0]["rotation_quaternion"],
+                                    samples[-1]["rotation_quaternion"])
+        ok(turned > 20.0, f"the pan part must turn the camera, got {turned}")
+        ok(moved > 0.2, f"the push part must move the camera, got {moved}")
+
+    @suite.case("the compound output mode decides what gets written")
+    def _():
+        from blender_motion_pipeline.camera.motion_templates import MotionTemplateLibrary
+        from blender_motion_pipeline.core.batch_runner import BatchRunner
+        from blender_motion_pipeline.core.sequence_generator import (
+            SequenceGenerator,
+            compound_parts,
+        )
+
+        names = ["still", "push_in"]
+        expected = {
+            "with_base": (2 + 2, True, True),
+            "only_compound": (2, False, True),
+            "only_base": (2, True, False),
+        }
+        for mode, (count, want_base, want_compound) in expected.items():
+            root = os.path.join(OUT_DIR, f"compound_mode_{mode}")
+            config = make_config(root, names=names)
+            config.composite.enabled = True
+            config.composite.mode = "full"
+            config.composite.output_mode = mode
+            report = BatchRunner(config, output_root=root,
+                                 scene_entries=[SceneEntry(path=state["single"])]).run()
+            ok(report.ok, report.summary_text())
+            equal(report.generated, count, mode)
+            tree = os.path.join(root, "single")
+            folders = sorted(name for name in os.listdir(tree)
+                             if os.path.isdir(os.path.join(tree, name)))
+            has_base = any(not name.startswith("compound_") for name in folders)
+            has_compound = any(name.startswith("compound_") for name in folders)
+            equal(has_base, want_base, f"{mode}: base shots present? {folders}")
+            equal(has_compound, want_compound, f"{mode}: compounds present? {folders}")
+
+        # The library itself must never be mutated by the compound expansion.
+        library = MotionTemplateLibrary.from_file(write_templates())
+        library.restrict_to(names)  # what the Motion filter does before a run
+        before = len(library)
+        equal(before, len(names))
+        config = make_config(os.path.join(OUT_DIR, "compound_lib"), names=names)
+        config.composite.enabled = True
+        generator = SequenceGenerator(config, output_root=OUT_DIR)
+        requests = generator.build_requests(
+            SceneEntry(path=state["single"]), library=library, cameras=["Camera"],
+            character_variants=[(False, None, None, "")],
+        )
+        equal(len(library), before, "building requests must not add compounds to the library")
+        equal(len(requests), before + 2, "2 base shots plus 2! compounds")
+        compound_requests = [r for r in requests if compound_parts(r.template)]
+        equal(len(compound_requests), 2)
+        ok(all(r.motion_name.startswith("compound_") for r in compound_requests))
+
+    @suite.case("a full compound of too many templates is refused with advice")
+    def _():
+        from blender_motion_pipeline.camera import motion_composite as mc
+        from blender_motion_pipeline.config.models import ConfigError
+
+        raises(ConfigError, lambda: mc.build_recipes([f"t{i}" for i in range(20)],
+                                                     mode=mc.MODE_FULL))
+        recipes, _warnings = mc.build_recipes(
+            ["a", "b", "c", "d", "e"], mode=mc.MODE_PARTIAL, types_per_sequence=4,
+            sequence_count=7, seed=11,
+        )
+        equal(len(recipes), 7)
+        for recipe in recipes:
+            equal(len(set(recipe.parts)), 4, "a partial compound uses x distinct templates")
+
     @suite.case("a run writes one self-contained project folder")
     def _():
         # What gets zipped to a render node: the sequence tree, the scenes the
@@ -792,6 +958,77 @@ def build_suite() -> Suite:
         output = (completed.stdout or "") + (completed.stderr or "")
         ok(completed.returncode == 0, output[-1200:])
         ok("sequence(s):" in output, output[-800:])
+
+    @suite.case("a moved project folder renders without --path-map")
+    def _():
+        # ``source_blend`` is an absolute path of the machine that generated the
+        # sequence (``E:/...`` on Windows), which a Linux render node cannot have.
+        # ``source_scene_rel`` is the same file relative to the project root, and
+        # ``project.json`` marks where that root is -- so copying the folder to
+        # another machine is enough, with no path mapping at all.
+        import contextlib
+        import io
+
+        from blender_motion_pipeline.core.batch_runner import BatchRunner
+        from blender_motion_pipeline.core.project import ProjectLayout
+        from blender_motion_pipeline.render import render_sequences as rs
+
+        source_root = os.path.join(OUT_DIR, "move_src")
+        layout = ProjectLayout.create(source_root, package_root=_PACKAGE_ROOT)
+        config = make_config(source_root, names=["push_in"])
+        report = BatchRunner(config, output_root=source_root,
+                             scene_entries=[SceneEntry(path=state["single"])],
+                             project_layout=layout).run()
+        ok(report.ok, report.summary_text())
+
+        # "scp the folder to the render node": a different absolute location.
+        moved = os.path.join(OUT_DIR, "move_dst", "blender_camera_moved")
+        shutil.rmtree(os.path.dirname(moved), ignore_errors=True)
+        shutil.copytree(layout.root, moved)
+        sequence_dir = os.path.join(moved, "sequence", "single", "push_in", "sequence_000001")
+        recorded = load_json_file(os.path.join(sequence_dir, "sequence_config.json"))
+        equal(recorded["sequence"]["source_scene_rel"],
+              "scene/" + os.listdir(os.path.join(moved, "scene"))[0])
+        recorded["sequence"]["source_blend"] = "Z:/gone/where-it-was-generated.blend"
+        save_json_file(os.path.join(sequence_dir, "sequence_config.json"), recorded)
+
+        list_args = rs.build_parser().parse_args([
+            "--input", sequence_dir, "--output", os.path.join(RENDER_DIR, "moved"),
+            "--list", "--log-level", "ERROR",
+        ])
+        job = rs.resolve_sequences(list_args)[0]
+        equal(os.path.normcase(job["project_root"]), os.path.normcase(moved),
+              "the project root must be found from the project.json above the sequence")
+        equal(job["source_scene_rel"], recorded["sequence"]["source_scene_rel"])
+        captured = io.StringIO()
+        with contextlib.redirect_stdout(captured):
+            equal(rs.run_render(list_args, mappings=[]), 0)
+        listing = captured.getvalue()
+        ok("[pending" in listing, listing)
+        ok("scene missing" not in listing, "the scene copy beside the sequence must be found")
+        ok(to_forward_slashes(os.path.join(moved, "scene")) in listing, listing)
+
+        args = rs.build_parser().parse_args([
+            "--input", sequence_dir, "--output", os.path.join(RENDER_DIR, "moved"),
+            "--engine", "BLENDER_WORKBENCH",
+            "--resolution-x", "160", "--resolution-y", "90",
+            "--overwrite", "--log-level", "ERROR",
+        ])
+        result = rs.render_sequence(rs.resolve_sequences(args)[0], args, mappings=[])
+        ok(result["ok"], result.get("error"))
+        ok(os.path.normcase(result["scene_file"]).startswith(os.path.normcase(moved)),
+           result["scene_file"])
+        ok(any("project folder" in warning for warning in result["warnings"]),
+           result["warnings"])
+        ok(os.path.isfile(result["files"]["video"]), result["files"])
+
+        # An explicit --project-root wins over the inferred one.
+        override_args = rs.build_parser().parse_args([
+            "--input", sequence_dir, "--output", os.path.join(RENDER_DIR, "moved"),
+            "--project-root", moved, "--list", "--log-level", "ERROR",
+        ])
+        equal(os.path.normcase(rs.resolve_sequences(override_args)[0]["project_root"]),
+              os.path.normcase(moved))
 
     @suite.case("the generated sequence JSON carries the documented fields")
     def _():
@@ -1592,6 +1829,12 @@ def build_suite() -> Suite:
         registration.register_all()
         try:
             context = bpy.context
+            # Reveal the conditional sub-panels too: the compound configuration only
+            # draws when it is switched on, so a name that disappeared there would
+            # otherwise never be exercised.
+            group = context.scene.mpp
+            previous_compound = group.compound_enabled
+            group.compound_enabled = True
             for name in sorted(dir(panels)):
                 panel = getattr(panels, name)
                 draw = getattr(panel, "draw", None)
@@ -1608,6 +1851,83 @@ def build_suite() -> Suite:
             ]
             equal(sorted(drawn), sorted(expected), "every panel must have been drawn")
             ok(len(drawn) >= 8, f"expected every panel to be drawn, saw {drawn}")
+        finally:
+            try:
+                bpy.context.scene.mpp.compound_enabled = previous_compound
+            except Exception:
+                pass
+            registration.unregister_all()
+
+    @suite.case("the compound configuration lives in the Sequence output panel")
+    def _():
+        import pathlib
+
+        import bpy
+
+        from blender_motion_pipeline import panels, registration
+
+        registration.register_all()
+        try:
+            group = bpy.context.scene.mpp
+            props = bpy.types.Scene.bl_rna.properties["mpp"].fixed_type.properties
+            for name in ("compound_enabled", "compound_mode", "compound_types",
+                         "compound_count", "compound_seed", "compound_output"):
+                ok(name in props, f"{name} must be a panel property")
+            equal(props["compound_enabled"].type, "BOOLEAN")
+            equal(props["compound_mode"].type, "ENUM")
+            equal(props["compound_types"].type, "INT")
+            equal(props["compound_types"].hard_min, 2, "x starts at 2")
+            equal(props["compound_types"].hard_max, 10, "x stops at 10")
+            equal([item.identifier for item in props["compound_output"].enum_items],
+                  ["with_base", "only_compound", "only_base"])
+
+            # Off by default, and "off" must mean no compound anywhere.
+            equal(group.compound_enabled, False)
+            equal(group.compound_ok(), True)
+            ok("off" in group.composite_summary(), group.composite_summary())
+            equal(group.to_config().composite.want_compound(), False)
+
+            # Enabling it round trips through BatchConfig.
+            group.compound_enabled = True
+            group.compound_mode = "full"
+            config = group.to_config()
+            equal(config.composite.enabled, True)
+            equal(config.composite.mode, "full")
+            group.from_config(config)
+            equal(group.compound_enabled, True)
+
+            # The summary explains the counts before anything is generated.
+            group.motion_count = 3
+            text = group.composite_summary()
+            ok("3!" in text and "6" in text, text)
+            group.compound_mode = "partial"
+            group.compound_types = 2
+            group.compound_count = 5
+            text = group.composite_summary()
+            ok("5 of 6" in text, text)
+            equal(group.compound_counts(), (5, 6))
+
+            # An impossible configuration is reported, not silently started.
+            group.compound_mode = "full"
+            group.motion_count = 20
+            ok(not group.compound_ok(), group.composite_summary())
+            ok("limit" in group.composite_summary(), group.composite_summary())
+            group.motion_count = 1
+            ok(not group.compound_ok(), group.composite_summary())
+            ok("at least 2" in group.composite_summary(), group.composite_summary())
+
+            # ... and every control is drawn by the Sequence output panel: the master
+            # switch unconditionally, the sub-panel controls only when it is on.
+            source = pathlib.Path(panels.__file__).read_text(encoding="utf-8")
+            body = source.split("class MPP_PT_output")[1].split("class MPP_PT_actions")[0]
+            head, separator, tail = body.partition("if group.compound_enabled:")
+            ok(separator, "the compound sub-panel must be conditional")
+            ok('prop(group, "compound_enabled"' in head,
+               "the master switch must be drawn unconditionally")
+            for name in ("compound_mode", "compound_types", "compound_count",
+                         "compound_seed", "compound_output"):
+                ok(f'prop(group, "{name}")' in tail,
+                   f"{name} must be inside the conditional sub-panel")
         finally:
             registration.unregister_all()
 

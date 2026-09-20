@@ -92,6 +92,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 _PACKAGE_PARENT = _ensure_package_importable(_HERE)
 
 from blender_motion_pipeline.core.camera_animation import PAYLOAD_KEY, apply_payload  # noqa: E402
+from blender_motion_pipeline.core.project import PROJECT_JSON  # noqa: E402
 from blender_motion_pipeline.core.sequence_manager import SequenceManager, SequenceInfo  # noqa: E402
 from blender_motion_pipeline.io.json_io import load_json_file, save_json_file  # noqa: E402
 from blender_motion_pipeline.io.path_utils import (  # noqa: E402
@@ -169,6 +170,9 @@ def build_parser() -> argparse.ArgumentParser:
                         help="root of a generated sequence tree to scan")
     source.add_argument("--recursive", action="store_true",
                         help="scan --input-root recursively (default when --input-root is given)")
+    source.add_argument("--project-root", default="",
+                        help="the project folder the sequences belong to; inferred from the "
+                             "project.json above each sequence when omitted")
     source.add_argument("--scene-filter", action="append", default=[], metavar="GLOB",
                         help="only render scenes matching this glob (repeatable)")
     source.add_argument("--motion-filter", action="append", default=[], metavar="GLOB",
@@ -342,12 +346,37 @@ def normalise_args(args):
     return args
 
 
+def project_root_for(sequence_dir: str) -> str:
+    """The project folder a sequence belongs to ("" when it lives in none).
+
+    A generated project always has ``project.json`` at its root and the sequence at
+    ``<project>/sequence/<scene>/<motion>/<sequence>``, so walking up finds it
+    without any flag -- which is what makes a project folder relocatable: the
+    ``source_blend`` recorded at generation time is an absolute path of the machine
+    that generated it, and ``source_scene_rel`` is the same file relative to the
+    project root.
+    """
+    current = normalize_path(sequence_dir)
+    for _ in range(6):
+        if os.path.isfile(os.path.join(current, PROJECT_JSON)):
+            return current
+        parent = os.path.dirname(current)
+        if parent == current:
+            break
+        current = parent
+    return ""
+
+
 def resolve_sequences(args) -> "list[dict]":
     """Turn the CLI arguments into a list of render jobs.
 
     ``--input-root`` implies a recursive scan: a generated tree is
     ``scene/motion/sequence`` and the useful default is "everything under here".
     ``--input`` remains the way to name one specific sequence folder.
+
+    Every job gets a ``project_root`` (``--project-root``, else inferred from the
+    ``project.json`` above the sequence), which is what lets a project folder that
+    was moved to another machine -- a Linux render node, say -- find its scenes.
     """
     normalise_args(args)
     jobs: "list[dict]" = []
@@ -368,6 +397,9 @@ def resolve_sequences(args) -> "list[dict]":
         )
         for info in found:
             jobs.append(_job_from_info(info, args.input_root))
+    explicit = normalize_path(getattr(args, "project_root", "") or "")
+    for job in jobs:
+        job["project_root"] = explicit or project_root_for(job["sequence_dir"])
     return jobs
 
 
@@ -416,8 +448,11 @@ def _job_from_info(info: SequenceInfo, root: str) -> dict:
         "fps": info.fps,
         "blend": blend,
         # Animation-only sequences (no scene copy) render by replaying the payload
-        # onto the source scene recorded at generation time.
+        # onto the source scene recorded at generation time.  ``source_scene_rel``
+        # is the same file relative to the project root, so a project folder that
+        # was copied to another machine (a Linux render node) still finds it.
         "source_blend": str((config.get("sequence") or {}).get("source_blend") or ""),
+        "source_scene_rel": str((config.get("sequence") or {}).get("source_scene_rel") or ""),
         "animation": info.animation_block,
         "storage_mode": info.storage_mode,
         "config": config,
@@ -449,6 +484,7 @@ def _job_from_blend(blend: str, root: str) -> dict:
         "fps": frames.get("fps"),
         "blend": normalize_path(blend),
         "source_blend": str(sequence.get("source_blend") or ""),
+        "source_scene_rel": str(sequence.get("source_scene_rel") or ""),
         "animation": (config.get("camera_animation") or {}) if isinstance(config.get("camera_animation"), dict) else {},
         "storage_mode": "blend",
         "config": config,
@@ -786,20 +822,38 @@ def find_sequence_camera(config: dict):
     return None
 
 
-def resolve_source_scene(raw: str, mappings) -> "tuple[str, str]":
-    """The scene an animation-only sequence replays onto, honouring ``--path-map``.
+def resolve_source_scene(raw: str, mappings, *, relative: str = "",
+                         project_root: str = "") -> "tuple[str, str]":
+    """The scene an animation-only sequence replays onto.
 
-    A sequence records the absolute path of the scene it was generated from.  On a
-    render node that scene usually lives somewhere else, and ``--path-map`` is the
-    documented way to bridge that -- so it has to apply to this path too, not only
-    to the textures *inside* the file.  The literal path wins when it exists, so
-    mappings never override a scene that is already reachable.
+    Three routes, in order:
 
-    Returns ``(path, note)``; ``note`` is empty unless a mapping was used.
+    1. the literal path recorded at generation time (it exists on the machine that
+       generated the sequence);
+    2. ``relative`` inside ``project_root`` -- the same file, relative to the project
+       folder, which is what makes that folder relocatable: a project generated on
+       Windows and copied to a Linux render node has a ``source_blend`` of
+       ``E:/...`` that cannot exist there, but ``scene/room.blend`` beside the
+       sequence tree does;
+    3. ``--path-map``, the documented way to bridge asset layouts, which applies to
+       this path too rather than only to the textures *inside* the file.
+
+    Returns ``(path, note)``; ``note`` is empty unless a fallback was used.
     """
+    if not raw and not (relative and project_root):
+        return "", ""
+    if raw and os.path.isfile(raw):
+        return raw, ""
+    if relative and project_root:
+        candidate = normalize_path(os.path.join(project_root, relative))
+        if os.path.isfile(candidate):
+            return candidate, (
+                f"source scene taken from the project folder: {relative} "
+                f"(recorded path {raw or '(none)'} is not on this machine)"
+            )
     if not raw:
         return "", ""
-    if os.path.isfile(raw) or not mappings:
+    if not mappings:
         return raw, ""
     mapped = apply_path_mappings(raw, mappings)
     if mapped and mapped != raw and os.path.isfile(mapped):
@@ -835,7 +889,11 @@ def load_sequence_scene(job: dict, result: dict, mappings=()) -> "tuple[bool, st
         result["error"] = f"sequence .blend not found: {blend or '(none discovered)'}"
         return False, ""
 
-    source, note = resolve_source_scene(str(job.get("source_blend") or ""), mappings)
+    source, note = resolve_source_scene(
+        str(job.get("source_blend") or ""), mappings,
+        relative=str(job.get("source_scene_rel") or ""),
+        project_root=str(job.get("project_root") or ""),
+    )
     if note:
         result["warnings"].append(note)
         LOGGER.info("%s", note)
@@ -992,9 +1050,10 @@ def render_sequence(job: dict, args, *, mappings, check_assets: bool = True) -> 
         if missing:
             result["warnings"].append(f"{len(missing)} external asset(s) are missing")
         LOGGER.info(
-            "[dry-run] %s -> %s (%d frame(s), %dx%d, %s)",
+            "[dry-run] %s -> %s (%d frame(s), %dx%d, %s) from %s",
             job["sequence_id"], os.path.dirname(outputs["video"]),
             frame_end - frame_start + 1, resolution[0], resolution[1], applied["engine"],
+            to_forward_slashes(result.get("scene_file") or job["blend"]),
         )
         return result
 
@@ -1431,9 +1490,17 @@ def run_render(args, *, mappings) -> int:
         for job in jobs:
             outputs = expected_outputs(job, args)
             state = "rendered" if os.path.isfile(outputs["video"]) else "pending"
-            scene = to_forward_slashes(job["blend"]) or (
-                "animation-only -> " + (to_forward_slashes(job.get("source_blend") or "") or "(no source scene)")
-            )
+            source = str(job.get("source_blend") or "")
+            scene = to_forward_slashes(job["blend"])
+            if not scene:
+                resolved, _note = resolve_source_scene(
+                    source, mappings,
+                    relative=str(job.get("source_scene_rel") or ""),
+                    project_root=str(job.get("project_root") or ""),
+                )
+                scene = "animation-only -> " + (to_forward_slashes(resolved) or "(no source scene)")
+                if resolved and not os.path.isfile(resolved):
+                    state = "scene missing"
             print(f"  [{state:8s}] {job['sequence_id']}  [{job.get('storage_mode', 'blend')}]  {scene}")
             if job.get("problems"):
                 for problem in job["problems"]:

@@ -40,23 +40,23 @@ come from elsewhere. That is exactly how this pipeline treats it:
 | `truck_left` / `truck_right` | 5 each | strafe along the camera's right axis |
 | `zoom_in` / `zoom_out` | 5 each | focal only (24 ↔ 85 mm) |
 
-**Axis semantics (derived, then verified).**
+**Axis semantics (derived from the reference, then verified).**
 
 * `location` is an offset in the camera's **own** frame — a `dolly_in` with
   `[150, 0, 0]` moves the camera *forward*, not along world +X.
-* Unreal's local convention is **X forward, Y right, Z up**.
-* `rotation` is `[roll, pitch, yaw]` in degrees. Evidence: `tilt_*` varies index
-  1 (±8°), `pan_*` varies index 2 (±60°), `roll_*` varies index 0.
-* Units are centimetres for location (push distances of 150–600 read naturally as
-  1.5–6 m) and millimetres for `focal` (24–140 mm is a plausible lens range).
-* `pan_right` uses **positive** yaw, `pan_left` **negative** — i.e. Unreal's yaw
-  is right-handed about +Z.
-
-Blender's camera looks down local **−Z** with **+X** right and **+Y** up, so the
-mapping is `[forward, right, up] → (right, up, −forward)` in camera-local space,
-and the yaw sign flips. All of this lives in
-`motion.unit_scale` (see the README) and is asserted by
-`tests/probe_axes.py` and `tests/test_motion_templates.py`.
+* The reference document uses Unreal's local convention: **X forward, Y right,
+  Z up**, centimetres, `rotation` as `[roll, pitch, yaw]` in degrees (evidence:
+  `tilt_*` varies index 1, `pan_*` index 2, `roll_*` index 0), and positive yaw
+  turns right.
+* The pipeline itself runs on **Blender coordinates with no conversion**: template
+  `location` is metres in the camera's own frame (`+X` right, `+Y` up, `+Z` back,
+  so `-Z` forward) and `rotation` is local degrees. The reference document was
+  migrated once with `tests/migrate_unreal_templates.py`
+  (`[forward, right, up]` cm → `[right, up, -forward]` m,
+  `[roll, pitch, yaw]` → `[pitch, -yaw, -roll]`); the pre-migration copy is kept as
+  `*.unreal_backup.json`. See the README's *Coordinate contract*.
+* Every axis is asserted by `tests/probe_axes.py` and locked down in
+  `tests/test_motion_templates.py`.
 
 ## 2. Unreal plugin architecture (`mh_scene_pipeline`)
 
@@ -130,12 +130,23 @@ rows of a **world-to-camera** matrix, flattened, produced as `R = [forward, righ
 up]`, `T = location`, then `R^T` and `-R^T·T`.
 
 This pipeline writes the identical header and the identical 12-value row layout,
-so the file is drop-in compatible. The mapping is documented in every file's `#`
-comment block: row 0 = OpenCV/UE +X (right), row 1 = +Y (down), row 2 = +Z
-(the camera's `back` axis, exactly as the reference computes it), translations
-from `W2C = [R^T | −R^T·c]`, units in Blender world units (metres by default).
-`tests/test_camera_validation.py` pins this with a hand-computed lookup table and
-the invariant that the camera's own position maps to the camera-space origin.
+so the file stays drop-in compatible in *shape*. The matrix itself is a Blender
+world-to-camera matrix: the rows are the camera's own axes -- row 0 = +X (right),
+row 1 = +Y (up), row 2 = +Z (the camera's `back` axis, so the view direction is
+`-row2`) -- with translations from `W2C = [R^T | −R^T·c]` and units in Blender
+world units (metres by default).
+
+The reference's OpenCV-style sign flip (row 1 negated for `+Y` down) is **not**
+applied: flipping a single row leaves `det(R) = −1`, i.e. a reflection, and a
+viewer that inverts the matrix (`tools/visualize_trajectory.py` does exactly that
+to draw the frustum) then draws a mirrored camera -- the measured symptom was a
+correct trajectory with the camera looking the wrong way. A consumer that wants
+OpenCV's `+Y` down / `+Z` forward flips rows 1 **and** 2 of both blocks, which
+keeps the determinant at `+1`.
+
+`tests/test_camera_validation.py` pins this with a hand-computed lookup table, the
+invariant that the camera's own position maps to the camera-space origin, the
+right-handedness of the block, and the round trip `inv([R|t]) == matrix_world`.
 
 ## 4. Deliberate differences
 

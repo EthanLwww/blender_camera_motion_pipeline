@@ -160,6 +160,24 @@ def build_parser() -> argparse.ArgumentParser:
     render_defaults.add_argument("--resolution", default="", metavar="X:Y")
     render_defaults.add_argument("--video-format", default="", help="mp4 | mkv | webm | avi")
 
+    composite = parser.add_argument_group("compound shots (several templates in one sequence)")
+    composite.add_argument("--compound", action="store_true", default=None,
+                           help="also generate compound sequences (same total frame range)")
+    composite.add_argument("--no-compound", dest="compound", action="store_false", default=None,
+                           help="generate only single-template sequences (default)")
+    composite.add_argument("--compound-mode", default="", choices=["", "full", "partial"],
+                           help="full = every ordering (n!); partial = x templates, N sequences")
+    composite.add_argument("--compound-types", type=int, default=None, metavar="X",
+                           help="partial compound: distinct templates per sequence (2-10)")
+    composite.add_argument("--compound-count", type=int, default=None, metavar="N",
+                           help="partial compound: how many distinct compounds to generate")
+    composite.add_argument("--compound-seed", type=int, default=None,
+                           help="partial compound: seed for the draw (reproducible)")
+    composite.add_argument("--compound-output", default="",
+                           choices=["", "with_base", "only_compound", "only_base"],
+                           help="what to write: compounds with the base shots, compounds only, "
+                                "or base shots only")
+
     behaviour = parser.add_argument_group("behaviour")
     behaviour.add_argument("--dry-run", action="store_true",
                            help="resolve everything and report the matrix without generating")
@@ -227,8 +245,7 @@ def build_config(args) -> BatchConfig:
     if args.frame_scale is not None:
         config.motion.frame_scale = float(args.frame_scale)
 
-    if args.validation_enabled is not None:
-        config.validation.enabled = bool(args.validation_enabled)
+    if args.validation_enabled is not None:        config.validation.enabled = bool(args.validation_enabled)
     if args.sample_step is not None:
         config.validation.sample_step = int(args.sample_step)
     if args.clearance is not None:
@@ -271,6 +288,22 @@ def build_config(args) -> BatchConfig:
             config.motion.frame_start = int(start_text)
         if end_text.strip():
             config.motion.frame_end = int(end_text)
+
+    if args.compound is not None:
+        config.composite.enabled = bool(args.compound)
+    if args.compound_mode:
+        config.composite.mode = args.compound_mode
+    if args.compound_types is not None:
+        config.composite.types_per_sequence = int(args.compound_types)
+    if args.compound_count is not None:
+        config.composite.sequence_count = int(args.compound_count)
+    if args.compound_seed is not None:
+        config.composite.seed = int(args.compound_seed)
+    if args.compound_output:
+        config.composite.output_mode = args.compound_output
+    if config.composite.enabled:
+        config.composite.validate()
+
     return config
 
 
@@ -484,6 +517,46 @@ def _dry_run_matrix(config: BatchConfig, entries, runner, args=None) -> int:
         )
     print(f"  templates     : {library.source} ({len(library)})")
     print(f"  provider      : {provider.name} / {provider.status()}")
+    compound_templates: "list" = []
+    composite = getattr(config, "composite", None)
+    if composite is not None and composite.enabled:
+        from blender_motion_pipeline.camera import motion_composite as mc
+
+        names = [template.name for template in library]
+        try:
+            compound_templates, warnings = mc.build_compound_templates(
+                library,
+                mode=composite.mode,
+                types_per_sequence=composite.types_per_sequence,
+                sequence_count=composite.sequence_count,
+                seed=composite.seed,
+                max_full_sequences=composite.max_full_sequences,
+                max_partial_sequences=composite.max_partial_sequences,
+                frame_start=config.motion.frame_start,
+                frame_end=config.motion.frame_end,
+                interpolation=config.motion.interpolation,
+                rotation_order=config.motion.unit_scale.rotation_order,
+            )
+            for warning in warnings:
+                print(f"  WARNING       : {warning}")
+            print(
+                f"  compound      : {len(compound_templates)} sequence(s) "
+                f"({mc.describe_counts(len(names), types_per_sequence=composite.types_per_sequence, mode=composite.mode)})"
+                f" output={composite.output_mode}"
+            )
+            for template in compound_templates[:5]:
+                print(f"      {template.name}")
+            if len(compound_templates) > 5:
+                print(f"      ... {len(compound_templates) - 5} more")
+        except Exception as exc:
+            print(f"  compound      : PROBLEM: {exc}")
+            return 1
+    # The effective template list: base templates plus the compounds, minus whatever
+    # the compound output mode excludes.
+    only_compound = bool(composite is not None and composite.enabled
+                         and composite.output_mode == "only_compound")
+    motion_count = (len(compound_templates) if only_compound
+                    else len(library) + len(compound_templates))
     total = 0
     for entry in entries:
         if not entry.exists:
@@ -497,10 +570,10 @@ def _dry_run_matrix(config: BatchConfig, entries, runner, args=None) -> int:
         if not cameras:
             print(f"  NO CAM  : {os.path.basename(entry.path)} has no camera; it would be skipped")
             continue
-        count = len(cameras) * len(library) * len(variants)
+        count = len(cameras) * motion_count * len(variants)
         total += count
         print(
-            f"  {os.path.basename(entry.path)}: {len(cameras)} camera(s) x {len(library)} motion(s) "
+            f"  {os.path.basename(entry.path)}: {len(cameras)} camera(s) x {motion_count} motion(s) "
             f"x {len(variants)} variant(s) = {count} sequence(s)"
         )
     print(f"\nwould generate {total} sequence(s)")

@@ -64,31 +64,31 @@ def _f(vector) -> str:
 
 def main() -> int:
     print(f"template file: {mt.__file__}")
-    report("dolly_in  (+X 300)", [{"frame": 0}, {"frame": 80, "location": [300, 0, 0]}],
+    report("dolly_in  (-Z 3.0)", [{"frame": 0}, {"frame": 80, "location": [0, 0, -3.0]}],
            expect="move 3 m along the view direction")
-    report("dolly_out (-X 300)", [{"frame": 0}, {"frame": 80, "location": [-300, 0, 0]}],
+    report("dolly_out (+Z 3.0)", [{"frame": 0}, {"frame": 80, "location": [0, 0, 3.0]}],
            expect="move 3 m against the view direction")
-    report("pedestal_up (+Z 120)", [{"frame": 0}, {"frame": 80, "location": [0, 0, 120]}],
-           expect="rise 1.2 m along world +Z")
-    report("pedestal_down (-Z 35)", [{"frame": 0}, {"frame": 80, "location": [0, 0, -35]}],
-           expect="drop 0.35 m along world -Z")
-    report("truck_right (+Y 200)", [{"frame": 0}, {"frame": 80, "location": [0, 200, 0]}],
-           expect="strafe 2 m toward the camera's right axis")
-    report("truck_left (-Y 200)", [{"frame": 0}, {"frame": 80, "location": [0, -200, 0]}],
+    report("pedestal_up (+Y 1.2)", [{"frame": 0}, {"frame": 80, "location": [0, 1.2, 0]}],
+           expect="rise 1.2 m along the camera's own up axis (local +Y)")
+    report("pedestal_down (-Y 0.35)", [{"frame": 0}, {"frame": 80, "location": [0, -0.35, 0]}],
+           expect="drop 0.35 m along the camera's own down axis")
+    report("truck_right (+X 2.0)", [{"frame": 0}, {"frame": 80, "location": [2.0, 0, 0]}],
+           expect="strafe 2 m toward the camera's right axis (local +X)")
+    report("truck_left (-X 2.0)", [{"frame": 0}, {"frame": 80, "location": [-2.0, 0, 0]}],
            expect="strafe 2 m toward the camera's left axis")
-    report("pan_right (+yaw 30)", [{"frame": 0}, {"frame": 80, "rotation": [0, 0, 30]}],
+    report("pan_right (ry -30)", [{"frame": 0}, {"frame": 80, "rotation": [0, -30, 0]}],
            expect="aim swings toward the right axis")
-    report("pan_left (-yaw 30)", [{"frame": 0}, {"frame": 80, "rotation": [0, 0, -30]}],
+    report("pan_left (ry +30)", [{"frame": 0}, {"frame": 80, "rotation": [0, 30, 0]}],
            expect="aim swings toward the left axis")
-    report("tilt_up (+pitch 20)", [{"frame": 0}, {"frame": 80, "rotation": [0, 20, 0]}],
+    report("tilt_up (rx +20)", [{"frame": 0}, {"frame": 80, "rotation": [20, 0, 0]}],
            expect="vertical component of the aim becomes positive")
-    report("tilt_down (-pitch 20)", [{"frame": 0}, {"frame": 80, "rotation": [0, -20, 0]}],
+    report("tilt_down (rx -20)", [{"frame": 0}, {"frame": 80, "rotation": [-20, 0, 0]}],
            expect="vertical component of the aim becomes negative")
-    report("roll (+roll 20)", [{"frame": 0}, {"frame": 80, "rotation": [20, 0, 0]}],
+    report("roll (rz -20)", [{"frame": 0}, {"frame": 80, "rotation": [0, 0, -20]}],
            expect="aim unchanged, up vector tilts toward the right axis")
     report("hitchcock push (focal 100 -> 50)",
            [{"frame": 0, "location": [0, 0, 0], "focal": 100.0},
-            {"frame": 80, "location": [340, 0, 0], "focal": 50.0}],
+            {"frame": 80, "location": [0, 0, -3.4], "focal": 50.0}],
            expect="move forward while the focal length shortens")
     return 0
 

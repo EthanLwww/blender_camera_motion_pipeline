@@ -18,7 +18,8 @@
 6. [无头渲染](#无头渲染)
 7. [配置参考](#配置参考)
 8. [运动模板](#运动模板)
-9. [相机校验与自动搜索](#相机校验与自动搜索)
+9. [复合运镜](#复合运镜compound-shots)
+10. [相机校验与自动搜索](#相机校验与自动搜索)
 10. [角色（Character）](#角色character)
 11. [渲染农场注意事项](#渲染农场注意事项)
 12. [测试](#测试)
@@ -182,7 +183,14 @@ CLI 的 `--sequence-root <dir>` 会把 `sequence/` 的内容直接写进 `<dir>`
 
 JSON 详情的首段与 Unreal 参考脚本（`movie_render.py`）的键保持一致，便于既有消费方复用（`level_name`、`sequence_name`、`video_id`、`video_path`、`frame_count`、`camera_trajectory`、`text_prompt`），第二段是渲染细节（`status`、`render.engine`/`resolution`、`trajectory_export` 等）。
 
-相机轨迹 TXT 表头固定 19 列：`frame focal_length d1 d2 d3 d4 d5 r00 r01 r02 tx r10 r11 r12 ty r20 r21 r22 tz`，采用 OpenCV 的 world-to-camera 约定（row0 = +X right、row1 = +Y down、row2 = +Z），`d1..d5` 为保留畸变位、恒为 0。
+相机轨迹 TXT 表头固定 19 列：`frame focal_length d1 d2 d3 d4 d5 r00 r01 r02 tx r10 r11 r12 ty r20 r21 r22 tz`，`d1..d5` 为保留畸变位、恒为 0。
+
+矩阵是 **Blender 自身的 world-to-camera 矩阵**，所以可视化工具可以**直接求逆**把相机画成场景里的真实姿态（`tools/visualize_trajectory.py` 就是这么做的：`inv(w2c)` → 视锥沿 local `-Z`、up 为 local `+Y`、世界 `Z` 向上，**不需要任何额外参数**）：
+
+* 三行就是相机自身三个轴在世界中的方向：`row0 = +X`（右）、`row1 = +Y`（上）、`row2 = +Z`（后）——因此**视线方向是 `-row2`**；
+* `det(R) = +1`（真正的旋转，`inv` 得到的是相机而不是镜像），且 `inv([R|t])` 等于 Blender 的 `matrix_world`（两条都有测试）；
+* 相机**前方**的点在相机坐标系里 `z` 为**负**（Blender 沿 local `-Z` 看）；
+* 若要 OpenCV 的 `+Y` 向下 / `+Z` 向前约定，把旋转与平移的第 1、2 行同时取反（`diag(1,-1,-1)`），行列式仍为 `+1`。只翻第 1 行（本导出以前为了模仿参考实现的做法）会得到行列式 `-1` 的镜像矩阵，任何可视化工具都无法正确求逆。
 
 ---
 
@@ -262,6 +270,27 @@ blender -b -P render/render_sequences.py -- \
 
 `--workers N` 会拉起 N 个 Blender 进程（各一批）。它只在瓶颈是"每进程"而非"每 GPU"时才有收益：EEVEE 在 GPU 上逐帧渲染，同一张卡上多个 worker 会抢 VRAM——在重场景上（3.3 M 面、34 盏投影灯、4.2 GB 常驻）3 个 worker 让每帧慢约 10 倍而不是吞吐涨 3 倍。单 GPU 机器上 `--workers 1` 最快。
 
+### 在另一台机器（Linux 渲染节点）上渲染
+
+项目文件夹是可搬移的，所以渲染节点只需要一个 Blender——**不用装插件、也不用写路径映射**：
+
+```bash
+# 传过去
+scp -r blender_camera_20260213 user@node:/data/proj/
+# 在那边渲染
+ssh node
+cd /data/proj/blender_camera_20260213
+BLENDER=/opt/blender-5.2.2-linux-x64/blender bash render_project.sh
+```
+
+为什么不需要任何参数：渲染器**就在**文件夹里，它 import 旁边的插件包；每条序列通过 `source_scene_rel`（`scene/<名字>.blend`）找到自己的场景，而 `project.json` 标出了项目根在哪。记录下来的 `source_blend` 是生成机器的绝对路径（`E:/…`），在节点上不可能存在——真正把镜头带过去的是那个相对路径。如果文件夹被重新组织过，用 `--project-root <dir>` 指明位置；此时 `--path-map` 只需要用于这些 `.blend` **内部**的资产。
+
+`--list` 会逐条打印它将打开哪个场景文件，找不到时标记为 `scene missing`——在新节点上这是最合适的第一条命令：
+
+```bash
+blender -b -P render_sequences.py -- --input-root sequence --output-root video --list
+```
+
 ### 让项目文件夹不依赖生成机器
 
 序列本身没问题（它存的是数据不是路径），项目中 `scene/` 里的 `.blend` 副本是唯一还指向生成机器的东西（贴图、链接库、缓存）：
@@ -300,12 +329,7 @@ blender -b -P "<project>/pack_textures.py" -- --scene-root "<project>/scene"
     "template_path": "E:/UE/.../camera_motion_templates.json",
     "template_names": [], "template_overrides": {},
     "frame_start": 0, "frame_scale": 1.0, "interpolation": "BEZIER",
-    "unit_scale": {
-      "location_scale": 0.01, "fps": 24.0, "rotation_order": "XYZ",
-      "yaw_axis": "Z", "pitch_axis": "X", "roll_axis": "Z",
-      "yaw_sign": -1.0, "pitch_sign": 1.0, "roll_sign": -1.0,
-      "location_forward": -1.0, "location_right": 1.0, "location_up": 1.0
-    }
+    "unit_scale": { "fps": 24.0, "rotation_order": "XYZ" }
   },
   "validation": {"enabled": true, "sample_step": 10, "clearance": 0.25},
   "search": {"enabled": true, "min_radius": 0.2, "max_radius": 3.0,
@@ -317,7 +341,7 @@ blender -b -P "<project>/pack_textures.py" -- --scene-root "<project>/scene"
 }
 ```
 
-键名接受 `snake_case`、`camelCase`、`kebab-case`、`UPPER_CASE`；未知键只给警告不报错，因此新版本写的配置在旧版本上仍能跑——包括已移除的 `batch.save_sequence_blend`（现在被忽略，因为不再有序列存场景副本）。
+键名接受 `snake_case`、`camelCase`、`kebab-case`、`UPPER_CASE`；未知键只给警告不报错，因此新版本写的配置在旧版本上仍能跑——包括已移除的 `batch.save_sequence_blend`（不再有序列存场景副本）和 Unreal 时代的 `motion.unit_scale` 映射键，现在都被忽略。
 
 ---
 
@@ -325,23 +349,35 @@ blender -b -P "<project>/pack_textures.py" -- --scene-root "<project>/scene"
 
 生成器读任何与参考文档同形状的文档，运动中没有任何类型被硬编码，加一个运动就是加一条 JSON。
 
-**发现顺序**：`motion.template_path`（面板字段 / `--templates`，不可读则报错）→ `motion.template_data`（配置内联数组）→ 环境变量 `$MOTION_PIPELINE_TEMPLATES` → 自带 `config/camera_motion_templates.json` → 已知参考位置（`E:\UE\DataGenScenes\Plugins\MetaHumanScenePipeline\Templates` 等，仅警告）→ 内置极简集合兜底。
+**发现顺序**：`motion.template_path`（面板字段 / `--templates`，不可读则报错）→ `motion.template_data`（配置内联数组）→ 环境变量 `$MOTION_PIPELINE_TEMPLATES` → 自带 `templates/camera_motion_templates.json` → 已知参考位置（`E:\UE\DataGenScenes\Plugins\MetaHumanScenePipeline\Templates` 等，仅警告）→ 内置极简集合兜底。
 
 **接受的形状**：`{"templates": [...]}`、`{"motion_templates": [...]}`、`{name: {...}}`、单个模板对象都可以；别名同样接受（`name`/`template` → `id`，`keyframes`/`samples`/`frames` → `keys`，`position`/`pos` → `location`，`angles`/`rot` → `rotation`，`lens`/`focal_length` → `focal`）。逐帧或逐模板的额外字段会保留在 `parameters` 里。
 
-**坐标约定**：模板 `location` 是相机**自身坐标系**下的偏移，采用 Unreal 轴向（**X = forward，Y = right，Z = up**）、单位厘米；`rotation` 是 `[roll, pitch, yaw]` 度。`motion.unit_scale` 把它映射到 Blender（`-Z` forward、`+X` right、`+Y` up）：
+**坐标约定：Blender 坐标系，不做任何转换。** 模板用 **Blender 坐标**书写，数值**原样使用**：不换轴、不翻符号、不缩放单位。写的就是相机自身的局部变换，和你在 Blender 里直接给相机摆位姿一模一样。
 
-| 模板量 | 变成 | 默认 |
-|---|---|---|
-| location 缩放 | 厘米 → 米 | `0.01` |
-| `location_forward` | Unreal +X → Blender **−Z** | `-1` |
-| `location_right` | Unreal +Y → Blender **+X** | `+1` |
-| `location_up` | Unreal +Z → Blender **+Y** | `+1` |
-| `yaw` | 绕世界 **+Z** | 符号 `-1` |
-| `pitch` | 绕相机局部 **X** | 符号 `+1` |
-| `roll` | 绕相机局部 **Z**（视线轴） | 符号 `-1` |
+| 模板量 | 含义 |
+|---|---|
+| `location` | 相机**自身坐标系**下的偏移，单位**米**：`+X` 右、`+Y` 上、`+Z` 后——即 **`-Z` 是前方**（前推 3 m 写 `[0, 0, -3]`） |
+| `rotation` | `[rx, ry, rz]` 度，绕同样的局部轴：`rx` 俯仰、`ry` 左右转、`rz` 滚转画面；按 `motion.unit_scale.rotation_order` 组合（默认 `XYZ`，即 Blender 自己的顺序） |
+| `focal` | 毫米 |
 
-以上每一条都被 `tests/probe_axes.py` 断言、并被 `tests/test_motion_templates.py` 锁定：默认参数下 `dolly_in` 确实把相机向前推、`pan_right` 确实向右转、`pedestal_up` 确实抬高、`truck_right` 确实向右平移、`roll` 确实只旋转画面不改变朝向。以 `hitchcock` 为例，模板是 3.4 m 纯前推，实测位移与相机 forward 轴夹角 **0.0°**、前向分量 **+3.400 m**、横向/纵向分量 0。
+偏移是在**相机起始朝向**下施加的，所以"向右 0.5 m、向上 1.2 m、向前 3 m"就是 `[0.5, 1.2, -3]`，与相机在世界里朝哪无关。
+
+以上每一条都被 `tests/probe_axes.py` 断言、并被 `tests/test_motion_templates.py` 锁定：`dolly_in` 确实把相机向前推、`pan_right` 确实向右转、`pedestal_up` 确实抬高、`truck_right` 确实向右平移、`roll` 确实只旋转画面不改变朝向。以 `hitchcock` 为例，模板是 `[0,0,-3.4]` 的纯前推，实测位移与相机 forward 轴夹角 **0.0°**、前向分量 **+3.400 m**、横向/纵向分量 0。
+
+所以 `motion.unit_scale` 只剩时间轴设置（`fps`、`rotation_order`）。Unreal 时代的键（`location_scale`、`location_forward/right/up`、`yaw_axis`/`pitch_axis`/`roll_axis` 及各自符号）已删除；配置里若仍有这些键，会收到一条指明迁移脚本的警告并被忽略。
+
+**把 Unreal 坐标的模板集迁移过来**（`location` 用厘米、`X` 前 `Y` 右 `Z` 上，`rotation` 是 `[roll, pitch, yaw]`、yaw 绕**世界**上轴）：离线转换一次即可：
+
+```bash
+python tests/migrate_unreal_templates.py --input templates.json --check     # 只报告
+python tests/migrate_unreal_templates.py --input templates.json --in-place  # 原地转换并留备份
+python tests/migrate_unreal_templates.py --input templates.json --output blender.json
+```
+
+规则：`location [forward, right, up]` 厘米 → `[right, up, -forward]` 米；`rotation [roll, pitch, yaw]` → 局部 `[pitch, -yaw, -roll]`；id、帧号、焦距以及所有额外字段原样保留。脚本会拒绝转换"看起来已经是 Blender 坐标"的文档（米制偏移数值很小），除非显式 `--force`，所以误跑两次是安全的。
+
+自带的 `templates/camera_motion_templates.json`、旁边的测试集、以及项目自己的参考文档都已用该脚本迁移；它们旁边的 `*.unreal_backup.json` 是迁移前的原件（永远不会被发现或加载——发现逻辑只认精确文件名）。
 
 **烘焙契约**：生成器构造的是**世界空间**位姿（校验器和轨迹 JSON/TXT 记录的就是它），烘焙必须在 Blender 实际求值相机的空间里精确复现。`obj.location` 位于对象的 **parent** 空间，所以带 parent 的相机逐帧换算：
 
@@ -367,6 +403,71 @@ local_basis = inverse(matrix_parent_inverse) @ inverse(parent_world) @ world_pos
 支持的补丁键：`keys`（整体替换）、`frame_scale`、`frame_offset`、`location_scale`、`focal_scale`、`focal`；其他键存为模板参数。
 
 **支持的模板**：文档里有多少就支持多少。参考文档有 **80** 个模板、16 个家族：`dolly_in`、`dolly_out`、`fixed`、`hitchcock`、`pan_left`、`pan_right`、`pedestal_down`、`pedestal_up`、`roll`、`tilt_down`、`tilt_up`、`truck_left`、`truck_right`、`zoom_in`、`zoom_out`（各 5 个变体，`hitchcock` 10 个）。`--motion-filter` / 面板的 **Motion filter** 可按 id 或 glob 选子集。
+
+---
+
+## 复合运镜（Compound shots）
+
+**复合镜头**把多个基础模板依次放进**同一条序列、且总帧数与单个模板完全一致**（参考集是 0..80 帧）。帧区间按份数切成若干窗口，每段被压缩进自己的窗口，并且**每一段都从上一段结束时的位姿接着走**——所以 `pan_right + hitchcock` 就是先向右摇、紧接着前推，没有剪切点，也不会变长。
+
+```
+pan_right_01_standard + hitchcock_01_base_forward_standard + truck_right_01_standard
+帧 0..80（81 个采样，与单个模板相同）
+  [1] 帧  0..26   pan_right  ：转 30.00°，位移 0.000 m
+  [2] 帧 27..53   hitchcock  ：前推 3.400 m，转 0.00°   （衔接处跳变：0.00 mm）
+  [3] 帧 54..80   truck_right：横移 3.000 m，转 0.00°   （衔接处跳变：0.00 mm）
+```
+
+实现方式是把一条配方**展平成一个普通模板**：它的关键帧是锚点坐标系下已经串接好的位姿。因此校验、相机自动搜索、烘焙、元数据、渲染器都把它当普通模板处理——轨迹的连续性和单镜头一样（上例最大逐帧位移 131 mm）。
+
+### 配置（面板 **Sequence output**）
+
+1. 勾选 **Enable compound shots** 后展开副配置栏。
+2. **Compound type（复合类型）**
+   * **Full compound（全量复合）**：全部已加载模板的**所有顺序**，即 ``n!`` 条序列。
+   * **Partial compound（部分复合）**：*Templates per sequence* 为 ``x``（2..10），*Sequence count* 为 ``N``：生成 ``N`` 条互不重复的序列，每条**恰好**由已加载的 ``n`` 个模板中的 ``x`` 个组成，从 ``x! * C(n, x)`` 种有序组合中按 *Random seed* 抽取（同种子重跑得到同一批，便于续跑）。
+3. **Compound output（复合镜头序列输出方式）**：**With base shots**（复合镜头与非复合镜头一起生成）、**Compound shots only**（只生成复合镜头）、**Base shots only**（忽略复合配置，只生成非复合镜头）。
+
+副配置栏会在开始前把数量写清楚（如 `Full compound: 6 sequence(s) = 3!`），并且对不可能完成的配置**拒绝启动并给出建议**：
+
+* ``n!`` 受 ``composite.max_full_sequences`` 限制（默认 5040 = 7!）。对 80 个模板做全量复合是 80!，没人渲染得完——请用 **Motion filter** 缩小模板集（例如 3 个模板 → 6 条复合），或改用部分复合。
+* 部分复合要求每条序列 2..10 个不同模板，不能超过存在的组合数 ``x! * C(n, x)``，并受 ``composite.max_partial_sequences``（100000）限制。
+
+### 产物
+
+| | |
+|---|---|
+| 文件夹 | 每个组合一个 ``scene/compound_<部分>+<部分>[...]``（过长时用哈希截断） |
+| 帧 | 与单个模板完全一致：``frame_start``、``frame_end``、``frame_count`` 都相同 |
+| ``sequence_config.json`` | ``motion.parameters.compound`` = ``{parts, windows, range, index}`` |
+| 其余 | 与普通序列完全相同：同样的产物、同样的渲染器、同样的轨迹 JSON/TXT |
+
+### CLI 与配置
+
+```bash
+# 3 个模板的全量复合，与非复合镜头一起生成
+blender -b -P motion_pipeline_cli.py -- \
+    --scenes "D:\scenes\room001.blend" --output-root "D:\projects" \
+    --motion-filter "pan_right_01_standard" --motion-filter "hitchcock_01_base_forward_standard" \
+    --motion-filter "truck_right_01_standard" \
+    --compound --compound-mode full --compound-output with_base
+
+# 12 条可复现的 4 模板复合，只生成复合镜头
+blender -b -P motion_pipeline_cli.py -- \
+    --config batch.json --compound --compound-mode partial \
+    --compound-types 4 --compound-count 12 --compound-seed 7 --compound-output only_compound
+```
+
+```json
+"composite": {
+  "enabled": true, "mode": "partial",
+  "types_per_sequence": 4, "sequence_count": 12, "seed": 7,
+  "output_mode": "with_base",
+  "max_full_sequences": 5040, "max_partial_sequences": 100000
+}
+```
+
+``--dry-run`` 会在写盘前列出复合镜头的名字与最终序列数量；``tests/probe_template_contract.py`` 也认识复合镜头：它会检查帧区间、窗口是否首尾相接，以及衔接处是否出现"剪切级"跳变（会报告 "the parts are not chained"）。
 
 ---
 
@@ -433,10 +534,10 @@ penalty = w_distance   · offset / 10 m
 ## 测试
 
 ```bash
-# 全量（纯 Python 套件 + Blender 套件）—— 208 个用例
+# 全量（纯 Python 套件 + Blender 套件）—— 232 个用例
 blender -b -P blender_camera_motion_pipeline/tests/run_blender_tests.py
 
-# 只跑纯套件，不需要 Blender —— 118 个用例
+# 只跑纯套件，不需要 Blender —— 136 个用例
 python blender_camera_motion_pipeline/tests/run_blender_tests.py
 
 # 单个套件也能独立运行
@@ -455,6 +556,10 @@ blender -b -P blender_camera_motion_pipeline/tests/probe_icons.py
 blender -b -P blender_camera_motion_pipeline/tests/probe_all_sequences.py -- "<sequence root>"
 blender -b -P blender_camera_motion_pipeline/tests/probe_blend_size.py -- "<scene.blend>"
 blender -b -P blender_camera_motion_pipeline/tests/probe_render_cost.py -- "<sequence.blend>"
+
+# 每条序列是否与生成它的模板数值一致（纯 Python）
+python blender_camera_motion_pipeline/tests/probe_template_contract.py -- \
+    --sequence-root "<生成的树>" --templates "<templates.json>"
 ```
 
 环境变量：`MP_KEEP_TEST_OUTPUT=1` 保留集成测试产物、`MP_KEEP_E2E=1` 保留端到端产物、`MP_TEST_TRACEBACK=1` 打印完整 traceback。`tests/_boot.py` 让套件与探针在插件文件夹被改名后仍能独立 import 插件包。
@@ -466,13 +571,14 @@ blender -b -P blender_camera_motion_pipeline/tests/probe_render_cost.py -- "<seq
 | `test_path_utils` | 16 | 通过 |
 | `test_config` | 18 | 通过 |
 | `test_project_layout` | 15 | 通过 |
-| `test_motion_templates` | 31 | 通过 |
-| `test_camera_validation` | 38 | 通过 |
+| `test_motion_templates` | 33 | 通过 |
+| `test_motion_composite` | 15 | 通过 |
+| `test_camera_validation` | 39 | 通过 |
 | `test_animation_api` | 10 | 通过 |
 | `test_addon_lifecycle` | 10 | 通过 |
 | `test_render_workflow` | 18 | 通过 |
-| `test_blender_integration` | 52 | 通过 |
-| **合计** | **208** | **通过** |
+| `test_blender_integration` | 58 | 通过 |
+| **合计** | **232** | **通过** |
 
 `tests/static_check.py` 另外检查全包无未使用 import、无遗留调试标记；其中一个集成用例用桩 layout 驱动**每个面板的 `draw()`**，避免"面板读了已不存在的属性、直到用户打开侧栏才崩"。
 

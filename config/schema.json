@@ -52,19 +52,10 @@
         "unit_scale": {
           "type": "object",
           "additionalProperties": false,
+          "description": "Timeline settings only: templates are authored in Blender coordinates and used verbatim, so there is no axis/sign/unit mapping any more.",
           "properties": {
-            "location_scale": { "type": "number" },
             "fps": { "type": "number", "exclusiveMinimum": 0 },
-            "rotation_order": { "type": "string", "enum": ["XYZ", "XZY", "YXZ", "YZX", "ZXY", "ZYX"] },
-            "yaw_axis": { "type": "string", "enum": ["X", "Y", "Z"] },
-            "pitch_axis": { "type": "string", "enum": ["X", "Y", "Z"] },
-            "roll_axis": { "type": "string", "enum": ["X", "Y", "Z"] },
-            "yaw_sign": { "type": "number" },
-            "pitch_sign": { "type": "number" },
-            "roll_sign": { "type": "number" },
-            "location_forward": { "type": "number" },
-            "location_right": { "type": "number" },
-            "location_up": { "type": "number" }
+            "rotation_order": { "type": "string", "enum": ["XYZ", "XZY", "YXZ", "YZX", "ZXY", "ZYX"] }
           }
         }
       }
@@ -149,6 +140,21 @@
         "motion_filter": { "type": "array", "items": { "type": "string" } },
         "sequence_filter": { "type": "array", "items": { "type": "string" } },
         "log_level": { "type": "string", "enum": ["DEBUG", "INFO", "WARNING", "ERROR"] }
+      }
+    },
+    "composite": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Compound shots: several base templates played one after another inside one sequence, keeping the same total frame range.",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "mode": { "type": "string", "enum": ["full", "partial"] },
+        "types_per_sequence": { "type": "integer", "minimum": 2, "maximum": 10 },
+        "sequence_count": { "type": "integer", "minimum": 1 },
+        "seed": { "type": "integer" },
+        "output_mode": { "type": "string", "enum": ["with_base", "only_compound", "only_base"] },
+        "max_full_sequences": { "type": "integer", "minimum": 1 },
+        "max_partial_sequences": { "type": "integer", "minimum": 1 }
       }
     }
   }

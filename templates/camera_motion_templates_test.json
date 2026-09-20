@@ -1,0 +1,25 @@
+[
+  {
+    "id": "hitchcock_01_base_forward_standard",
+    "keys": [
+      {
+        "frame": 0,
+        "location": [0.0, 0.0, 0.0],
+        "rotation": [0.0, 0.0, 0.0],
+        "focal": 100.0
+      },
+      {
+        "frame": 40,
+        "location": [0.0, 0.0, -1.7],
+        "rotation": [0.0, 0.0, 0.0],
+        "focal": 75.0
+      },
+      {
+        "frame": 80,
+        "location": [0.0, 0.0, -3.4],
+        "rotation": [0.0, 0.0, 0.0],
+        "focal": 50.0
+      }
+    ]
+  }
+]

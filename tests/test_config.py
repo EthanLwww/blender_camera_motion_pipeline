@@ -95,23 +95,37 @@ def build_suite() -> Suite:
         equal(config.batch.mode, CHARACTER_MODE_NONE)
         ok(any("sometimes" in w for w in config.warnings), config.warnings)
 
-    @suite.case("unit scale rejects a pitch/roll axis collision")
+    @suite.case("the template unit scale keeps only the timeline settings")
     def _():
-        raises(ConfigError, lambda: TemplateUnitScale.from_dict(
-            {"pitch_axis": "X", "roll_axis": "X"}, []
-        ))
-        # yaw names the WORLD axis, so it may legitimately match the local roll axis.
-        scale = TemplateUnitScale.from_dict({"yaw_axis": "Z", "roll_axis": "Z", "pitch_axis": "X"}, [])
-        equal(scale.yaw_axis, "Z")
-        equal(scale.roll_axis, "Z")
-        raises(ConfigError, lambda: TemplateUnitScale.from_dict({"location_scale": 0.0}, []))
-        raises(ConfigError, lambda: TemplateUnitScale.from_dict({"location_forward": 2.0}, []))
-        default = TemplateUnitScale.from_dict({}, [])
-        equal(default.pitch_axis, "X")
-        equal(default.roll_axis, "Z")
-        scale = TemplateUnitScale.from_dict({"location_scale": 1.0, "fps": 30.0}, [])
-        close(scale.location_scale, 1.0)
+        # Templates are Blender-native now, so there is no axis/sign mapping left to
+        # configure: fps and the rotation order are all that remain, and a config
+        # that still sets the Unreal keys gets one actionable warning.
+        warnings: "list[str]" = []
+        scale = TemplateUnitScale.from_dict({"fps": 30.0}, warnings)
         close(scale.fps, 30.0)
+        equal(scale.rotation_order, "XYZ")
+        equal(warnings, [])
+        # The removed keys are named once, with the migration script, instead of
+        # each producing its own "unknown key" line.
+        ok("location_scale" in TemplateUnitScale.REMOVED_KEYS)
+
+        raises(ConfigError, lambda: TemplateUnitScale.from_dict({"fps": 0.0}, []))
+        # An unknown order is a warning plus the default, and validate() still
+        # refuses it when it is set directly on the dataclass.
+        order_warnings: "list[str]" = []
+        fallback = TemplateUnitScale.from_dict({"rotation_order": "ABC"}, order_warnings)
+        equal(fallback.rotation_order, "XYZ")
+        ok(any("ABC" in w for w in order_warnings), order_warnings)
+        raises(ConfigError, lambda: TemplateUnitScale(rotation_order="ABC").validate())
+
+        legacy_warnings: "list[str]" = []
+        legacy = TemplateUnitScale.from_dict({"location_scale": 0.01, "yaw_axis": "Z"},
+                                            legacy_warnings)
+        equal(len(legacy_warnings), 1, legacy_warnings)
+        ok("migrate_unreal_templates.py" in legacy_warnings[0], legacy_warnings[0])
+        equal([name for name in TemplateUnitScale.REMOVED_KEYS if hasattr(legacy, name)], [])
+        default = TemplateUnitScale.from_dict({}, [])
+        close(default.fps, 24.0)
 
     @suite.case("applying a partial config onto a base preserves the rest")
     def _():
@@ -129,7 +143,7 @@ def build_suite() -> Suite:
             "batch": {"output_root": r"D:\o", "mode": "both", "resume": False,
                       "path_mappings": [{"from": "A", "to": "B"}]},
             "motion": {"template_names": ["fixed_01_standard"], "frame_scale": 2.0,
-                       "unit_scale": {"location_scale": 0.01, "yaw_sign": 1.0}},
+                       "unit_scale": {"fps": 30.0, "rotation_order": "ZYX"}},
             "validation": {"extra_sample_frames": [3, 9]},
             "search": {"weights": {"distance": 2.0}},
             "render": {"engine": "CYCLES", "samples": 7},

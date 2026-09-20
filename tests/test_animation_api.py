@@ -213,8 +213,8 @@ def build_suite() -> Suite:
         scene, camera = _scene_with_animated_camera()
         keyframes = [
             {"frame": 0, "location": [0, 0, 0], "rotation": [0, 0, 0], "focal": 35},
-            {"frame": 4, "location": [40, 0, 0], "rotation": [0, 0, 0], "focal": 35},
-            {"frame": 8, "location": [80, 0, 0], "rotation": [0, 0, 0], "focal": 35},
+            {"frame": 4, "location": [0, 0, -0.4], "rotation": [0, 0, 0], "focal": 35},
+            {"frame": 8, "location": [0, 0, -0.8], "rotation": [0, 0, 0], "focal": 35},
         ]
         library = MotionTemplateLibrary.from_entries([{"id": "push", "keys": keyframes}],
                                                      source="probe")

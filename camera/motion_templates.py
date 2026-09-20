@@ -1,14 +1,14 @@
 """Generic parser and animator for camera motion template JSON.
 
-Nothing here is hard-coded to a specific motion name.  The reference document
-(``camera_motion_templates.json``) is a flat array of 80 entries shaped like::
+Nothing here is hard-coded to a specific motion name.  A template document is a
+flat array of entries shaped like::
 
     {
       "id": "dolly_in_01_standard",
       "keys": [
-        {"frame": 0,  "location": [0, 0, 0],    "rotation": [0, 0, 0],  "focal": 35},
-        {"frame": 40, "location": [150, 0, 0],  "rotation": [0, 0, 0],  "focal": 35},
-        {"frame": 80, "location": [300, 0, 0],  "rotation": [0, 0, 0],  "focal": 35}
+        {"frame": 0,  "location": [0, 0, 0],     "rotation": [0, 0, 0],  "focal": 35},
+        {"frame": 40, "location": [0, 0, -1.5],  "rotation": [0, 0, 0],  "focal": 35},
+        {"frame": 80, "location": [0, 0, -3.0],  "rotation": [0, 0, 0],  "focal": 35}
       ]
     }
 
@@ -18,17 +18,34 @@ The parser also accepts a dictionary root (``{"templates": [...]}``), nested
 so a future template file can be dropped in without touching code.  Adding a
 new *motion type* therefore means adding a JSON entry, never a Python branch.
 
-Coordinate contract
--------------------
-Template ``location`` is an offset applied **in the camera's own frame** using
-Unreal's axis convention (X forward, Y right, Z up) and is scaled to Blender
-units by ``TemplateUnitScale.location_scale``.  Template ``rotation`` is
-``[roll, pitch, yaw]`` in degrees.  ``TemplateUnitScale`` carries the axis and
-sign mapping into Blender (``-Z`` forward, ``+X`` right, ``+Y`` up), with yaw
-applied about world ``+Z`` first and pitch/roll applied in the yawed camera
-frame.  With the defaults, ``dolly_in`` really does push the camera forward,
-``pan_right`` really does turn it right, and ``pedestal_up`` really does raise
-it -- each of those is asserted in ``tests/test_motion_templates.py``.
+Coordinate contract -- Blender, with no conversion
+--------------------------------------------------
+Templates are authored in **Blender coordinates** and the numbers are used
+**verbatim**; there is no axis swap, no sign flip and no unit rescaling.
+
+* ``location`` is an offset **in the camera's own frame**, in **metres**, using
+  the camera's local Blender axes: ``+X`` right, ``+Y`` up, ``-Z`` forward (so a
+  forward push is negative Z, and ``+Z`` is backwards).  It is applied as an
+  offset from the camera's starting position, rotated by the camera's starting
+  orientation -- i.e. "0.5 m to my right, 0.2 m up, 1.5 m forward" is
+  ``[0.5, 0.2, -1.5]`` no matter how the camera is aimed in the world.
+* ``rotation`` is ``[rx, ry, rz]`` in **degrees** about the same local axes, i.e.
+  the numbers you would type into Blender's own camera rotation fields:
+  ``rx`` tilts (pitch), ``ry`` turns left/right about the camera's up axis, and
+  ``rz`` rolls the frame about the view axis.  They are composed in
+  ``motion.unit_scale.rotation_order`` (default ``XYZ``, Blender's order) and
+  applied *inside* the camera's starting orientation.
+* ``focal`` is millimetres.
+
+With this contract ``dolly_in`` moves the camera along its own view axis,
+``pan_right`` turns it to its right, ``pedestal_up`` raises it, ``truck_right``
+strafes it right and ``roll`` spins the frame without turning the aim -- each of
+those is asserted in ``tests/test_motion_templates.py``.
+
+Template sets written for Unreal (centimetres, ``X`` forward / ``Y`` right /
+``Z`` up, ``[roll, pitch, yaw]``) must be converted once, not at run time::
+
+    python tests/migrate_unreal_templates.py --input <templates.json> --in-place
 """
 
 from __future__ import annotations
@@ -207,8 +224,8 @@ def axis_basis(camera_matrix: Sequence[Sequence[float]]) -> "tuple[Vec3, Vec3, V
     directly in ``tests/test_motion_templates.py``.
 
     The axes are **unit length whatever the camera's scale is**
-    (:func:`orthonormal_axes`), so a template offset in centimetres becomes metres
-    in the world rather than being multiplied by the object's scale.
+    (:func:`orthonormal_axes`), so a template offset in metres stays metres in the
+    world instead of being multiplied by the object's scale.
     """
     right, up, back = orthonormal_axes(camera_matrix)
     return (right, up, vec_scale(back, -1.0))
@@ -780,23 +797,23 @@ EMBEDDED_TEMPLATES: "list[MotionTemplate]" = [
     ]),
     _embedded_template("dolly_in_01_standard", [
         (0, (0, 0, 0), (0, 0, 0), 35.0),
-        (40, (150, 0, 0), (0, 0, 0), 35.0),
-        (80, (300, 0, 0), (0, 0, 0), 35.0),
+        (40, (0, 0, -1.5), (0, 0, 0), 35.0),
+        (80, (0, 0, -3.0), (0, 0, 0), 35.0),
     ]),
     _embedded_template("dolly_out_01_standard", [
         (0, (0, 0, 0), (0, 0, 0), 35.0),
-        (40, (-150, 0, 0), (0, 0, 0), 35.0),
-        (80, (-300, 0, 0), (0, 0, 0), 35.0),
+        (40, (0, 0, 1.5), (0, 0, 0), 35.0),
+        (80, (0, 0, 3.0), (0, 0, 0), 35.0),
     ]),
     _embedded_template("pan_right_01_standard", [
         (0, (0, 0, 0), (0, 0, 0), 35.0),
-        (40, (0, 0, 0), (0, 0, 15.0), 35.0),
-        (80, (0, 0, 0), (0, 0, 30.0), 35.0),
+        (40, (0, 0, 0), (0, -15.0, 0), 35.0),
+        (80, (0, 0, 0), (0, -30.0, 0), 35.0),
     ]),
     _embedded_template("pedestal_up_01_standard", [
         (0, (0, 0, 0), (0, 0, 0), 35.0),
-        (40, (0, 0, 60), (0, 0, 0), 35.0),
-        (80, (0, 0, 120), (0, 0, 0), 35.0),
+        (40, (0, 0.6, 0), (0, 0, 0), 35.0),
+        (80, (0, 1.2, 0), (0, 0, 0), 35.0),
     ]),
 ]
 
@@ -920,51 +937,37 @@ class MotionTemplateGenerator:
     def local_offset(self, template_location: Sequence[float]) -> Vec3:
         """Template location -> offset in the camera's own (Blender) frame.
 
-        A Blender camera's local frame is ``+X`` right, ``+Y`` up, ``-Z``
-        forward, so ``[forward, right, up]`` becomes ``(right, up, -forward)``.
-        The result must be applied as the inner term of ``right*x + up*y +
-        forward*z`` -- note the view axis is already its own vector there, which
-        is why no extra sign appears at the application site.
+        The numbers are Blender coordinates already: ``+X`` right, ``+Y`` up,
+        ``+Z`` backwards (so ``-Z`` is forward), in metres.  Nothing is scaled or
+        swapped -- that is the whole point of the Blender-native contract -- so this
+        only normalises the sequence into a 3-tuple.  :meth:`generate` applies it as
+        ``right*x + up*y + back*z`` with the camera's own local axes, which is the
+        same thing as pasting the numbers into a camera's local transform.
         """
-        scale = self.unit_scale.location_scale
-        ue_forward, ue_right, ue_up = (component * scale for component in template_location[:3])
-        forward = ue_forward * self.unit_scale.location_forward
-        right = ue_right * self.unit_scale.location_right
-        up = ue_up * self.unit_scale.location_up
-        # Blender camera local frame: +X right, +Y up, -Z forward.
-        return (right, up, -forward)
+        values = [float(v) for v in template_location[:3]]
+        while len(values) < 3:
+            values.append(0.0)
+        return (values[0], values[1], values[2])
 
     def rotation_delta(self, template_rotation: Sequence[float]) -> Quat:
-        """``[roll, pitch, yaw]`` (degrees) -> extra rotation about base frame.
+        """``[rx, ry, rz]`` (degrees, camera-local) -> rotation of the camera.
 
-        Yaw is applied about world ``+Z``; pitch and roll are applied in the
-        camera's own (already yawed) frame.  Returned as a single quaternion in
-        the *yawed* local frame so callers can compose it as
-        ``q_yaw * q_base * q_local``.
+        The three components are rotations about the camera's own ``X`` (tilt),
+        ``Y`` (turn) and ``Z`` (roll) axes, composed in
+        ``unit_scale.rotation_order`` (``XYZ`` applies ``rx`` first, matching
+        Blender's own Euler order).  The result is returned as a quaternion in the
+        camera's local frame, so callers compose it *inside* the base orientation
+        (``q_base * q_local``) -- no world-axis yaw, no sign flips.
         """
-        roll, pitch, yaw = (float(v) for v in template_rotation[:3])
-        scale = self.unit_scale
-        yaw_q = quat_from_axis_angle("Z", yaw * scale.yaw_sign)
-        pitch_q = quat_from_axis_angle(scale.pitch_axis, pitch * scale.pitch_sign)
-        roll_q = quat_from_axis_angle(scale.roll_axis, roll * scale.roll_sign)
-        order = {
-            "XYZ": (roll_q, pitch_q, yaw_q),
-            "XZY": (roll_q, yaw_q, pitch_q),
-            "YXZ": (pitch_q, roll_q, yaw_q),
-            "YZX": (pitch_q, yaw_q, roll_q),
-            "ZXY": (yaw_q, roll_q, pitch_q),
-            "ZYX": (yaw_q, pitch_q, roll_q),
-        }[scale.rotation_order]
-        composed = (1.0, 0.0, 0.0, 0.0)
-        for part in order:
-            composed = quat_multiply(composed, part)
-        # Yaw about world Z must stay outside the base orientation.
-        yaw_local = quat_multiply(quat_conjugate(yaw_q), composed)
-        return quat_normalize(yaw_local)
-
-    def yaw_quaternion(self, template_rotation: Sequence[float]) -> Quat:
-        _, _, yaw = (float(v) for v in template_rotation[:3])
-        return quat_from_axis_angle("Z", yaw * self.unit_scale.yaw_sign)
+        values = [float(v) for v in template_rotation[:3]]
+        while len(values) < 3:
+            values.append(0.0)
+        angles = {"X": values[0], "Y": values[1], "Z": values[2]}
+        order = self.unit_scale.rotation_order
+        composed: Quat = (1.0, 0.0, 0.0, 0.0)
+        for axis in order:
+            composed = quat_multiply(quat_from_axis_angle(axis, angles[axis]), composed)
+        return quat_normalize(composed)
 
     # -- main ------------------------------------------------------------
     def generate(
@@ -996,6 +999,10 @@ class MotionTemplateGenerator:
             float(base_matrix[2][3]),
         )
         right, up, forward = axis_basis(base_matrix)
+        # ``axis_basis`` returns the *view* direction as its third vector, which is
+        # the camera's local ``-Z``; a Blender-coordinate template indexes ``+Z``
+        # (backwards), so the third component multiplies the back axis.
+        back = vec_scale(forward, -1.0)
         if base_quaternion is None:
             base_quaternion = matrix_to_quaternion(base_matrix)
         base_quaternion = quat_normalize(base_quaternion)
@@ -1014,17 +1021,15 @@ class MotionTemplateGenerator:
                 template_frame = (scene_frame - (self.frame_offset or 0)) / self.frame_scale
             key = template.interpolate(template_frame)
             local = self.local_offset(key.location)
-            # ``local`` is already expressed in the camera's own frame
-            # ``(right, up, forward)``, and ``forward`` here is the *view*
-            # direction, so the components multiply the basis directly.  An
-            # extra negation on the forward term would invert every dolly.
+            # ``local`` holds the template's Blender numbers unchanged: +X right,
+            # +Y up, +Z backwards, so multiplying the camera's own axes applies the
+            # offset exactly as authored (a forward push is a negative Z).
             world_offset = vec_add(
                 vec_add(vec_scale(right, local[0]), vec_scale(up, local[1])),
-                vec_scale(forward, local[2]),
+                vec_scale(back, local[2]),
             )
-            yaw_q = self.yaw_quaternion(key.rotation)
-            local_q = self.rotation_delta(key.rotation)
-            quaternion = quat_multiply(quat_multiply(yaw_q, base_quaternion), local_q)
+            # The rotation is local, so it composes inside the base orientation.
+            quaternion = quat_multiply(base_quaternion, self.rotation_delta(key.rotation))
             focal = float(key.focal) if template.focals() else float(base_focal)
             samples.append(
                 CameraSample(

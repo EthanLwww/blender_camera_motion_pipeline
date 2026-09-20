@@ -490,6 +490,60 @@ class MPP_SceneProperties(PropertyGroup):
     trajectory_mode: EnumProperty(name="Trajectory", items=TRAJECTORY_MODES, default="all_frames")
     trajectory_step: IntProperty(name="Trajectory step", default=1, min=1, max=1000)
 
+    # -- compound shots (澶嶅悎杩愰暅) ----------------------------------------
+    compound_enabled: BoolProperty(
+        name="Compound shots",
+        description=(
+            "Also generate compound sequences: several base camera moves played one "
+            "after another inside the same total frame range (0-80 frames), each part "
+            "starting where the previous one ended"
+        ),
+        default=False,
+    )
+    compound_mode: EnumProperty(
+        name="Compound type",
+        description="How the base templates are combined",
+        items=(
+            ("full", "Full compound",
+             "Every ordering of every loaded template: n! sequences"),
+            ("partial", "Partial compound",
+             "Sequences of x distinct templates, a chosen number of them, drawn from "
+             "the x! * C(n, x) possible orderings"),
+        ),
+        default="full",
+    )
+    compound_types: IntProperty(
+        name="Templates per sequence",
+        description="x: how many distinct base templates one compound sequence contains",
+        default=2, min=2, max=10,
+    )
+    compound_count: IntProperty(
+        name="Sequence count",
+        description=(
+            "How many distinct compounds a partial compound generates (at most "
+            "x! * C(n, x); random but seeded, so a re-run reproduces the same set)"
+        ),
+        default=12, min=1, max=100000,
+    )
+    compound_seed: IntProperty(
+        name="Random seed",
+        description="Seed for the partial compound draw, so runs are reproducible",
+        default=1234, min=0,
+    )
+    compound_output: EnumProperty(
+        name="Compound output",
+        description="What the run writes",
+        items=(
+            ("with_base", "With base shots",
+             "Generate the compound sequences together with the single-template ones"),
+            ("only_compound", "Compound shots only",
+             "Generate only the compound sequences"),
+            ("only_base", "Base shots only",
+             "Ignore the compound configuration and generate only the single-template ones"),
+        ),
+        default="with_base",
+    )
+
     # -- local rendering --------------------------------------------------
     render_list: CollectionProperty(type=MPP_RenderItem)
     render_list_index: IntProperty(name="Selected sequence", default=-1, min=-1)
@@ -641,6 +695,12 @@ class MPP_SceneProperties(PropertyGroup):
         config.batch.resume = bool(self.resume)
         config.batch.save_validation_report = bool(self.save_validation_report)
         config.batch.verbose = bool(self.verbose_logging)
+        config.composite.enabled = bool(self.compound_enabled)
+        config.composite.mode = self.compound_mode
+        config.composite.types_per_sequence = int(self.compound_types)
+        config.composite.sequence_count = int(self.compound_count)
+        config.composite.seed = int(self.compound_seed)
+        config.composite.output_mode = self.compound_output
         config.batch.character_asset_root = (
             normalize_path(self.character_asset_root) if self.character_asset_root else ""
         )
@@ -746,6 +806,73 @@ class MPP_SceneProperties(PropertyGroup):
             "  render_sequences.py + the package: render this folder on any machine",
         ])
 
+    # -- compound shots ---------------------------------------------------
+    def compound_counts(self) -> "tuple[int, int]":
+        """``(planned, space)`` compound sequences for the current settings.
+
+        ``space`` is how many distinct compounds exist (``n!`` for a full compound,
+        ``x! * C(n, x)`` for a partial one) and ``planned`` how many will be
+        generated, so the panel can show "12 of 90" before a run starts.
+        """
+        from .camera import motion_composite as mc
+        from .config.models import CompositeSection
+
+        total = int(self.motion_count)
+        if total < 2:
+            return 0, 0
+        if self.compound_mode == "full":
+            space = mc.factorial(total)
+            return (0, space) if space > CompositeSection().max_full_sequences else (space, space)
+        x = int(self.compound_types)
+        if x > total or x < 2:
+            return 0, 0
+        space = mc.ordered_count(total, x)
+        return min(int(self.compound_count), space), space
+
+    def compound_ok(self) -> bool:
+        """Can this configuration actually run?"""
+        if not self.compound_enabled:
+            return True
+        planned, space = self.compound_counts()
+        return planned > 0 and space > 0
+
+    def composite_summary(self) -> str:
+        """Multi-line description of the compound plan (panel label)."""
+        from .camera import motion_composite as mc
+        from .config.models import CompositeSection
+
+        if not self.compound_enabled:
+            return "Compound shots are off: one sequence per template."
+        output = {
+            "with_base": "together with the base shots",
+            "only_compound": "compound shots only",
+            "only_base": "base shots only -- nothing compound will be written",
+        }.get(self.compound_output, self.compound_output)
+        total = int(self.motion_count)
+        if total < 2:
+            return (f"Compound shots need at least 2 loaded templates (currently {total}).\n"
+                    f"Load motion templates, or widen the Motion filter. Output: {output}.")
+        if self.compound_mode == "full":
+            count = mc.factorial(total)
+            limit = CompositeSection().max_full_sequences
+            if count > limit:
+                return (f"Full compound of {total} templates = {count} sequences (n!), above the "
+                        f"{limit} limit.\nNarrow the template set with the Motion filter, or switch "
+                        f"to Partial compound.")
+            return (f"Full compound: {count} sequence(s) = {total}!\n"
+                    f"Each part plays in its own window of the same total frame range a "
+                    f"single template uses. Output: {output}.")
+        x = int(self.compound_types)
+        if x > total:
+            return (f"Partial compound needs at least {x} templates, but only {total} are loaded.\n"
+                    f"Widen the Motion filter or lower Templates per sequence.")
+        space = mc.ordered_count(total, x)
+        planned = min(int(self.compound_count), space)
+        extra = "" if planned == int(self.compound_count) else f" (capped from {int(self.compound_count)})"
+        return (f"Partial compound: {planned}{extra} of {space} distinct {x}-template ordering(s)\n"
+                f"= {x}! x C({total},{x}), drawn with seed {self.compound_seed}. "
+                f"Output: {output}.")
+
     def from_config(self, config: BatchConfig) -> None:
         """Push a :class:`BatchConfig` into the panel fields."""
         self.output_root = config.batch.output_root
@@ -754,6 +881,12 @@ class MPP_SceneProperties(PropertyGroup):
         self.resume = bool(config.batch.resume)
         self.save_validation_report = bool(config.batch.save_validation_report)
         self.verbose_logging = bool(config.batch.verbose)
+        self.compound_enabled = bool(config.composite.enabled)
+        self.compound_mode = config.composite.mode
+        self.compound_types = int(config.composite.types_per_sequence)
+        self.compound_count = int(config.composite.sequence_count)
+        self.compound_seed = int(config.composite.seed)
+        self.compound_output = config.composite.output_mode
         self.character_asset_root = config.batch.character_asset_root
         self.animation_asset_root = config.batch.animation_asset_root
         if config.batch.character_provider in ("auto", "blender", "null", "unreal_metahuman"):

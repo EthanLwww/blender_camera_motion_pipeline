@@ -1,16 +1,21 @@
 """Camera trajectory (TXT) and per-sequence JSON metadata export.
 
-Artifact formats follow ``E:\\VSCode\\CameraCtrl\\movie_render.py`` so the same
-downstream consumers (notably the ``CameraPoseVisualizer`` script) keep working:
+Artifact formats keep the reference script's *layout*
+(``E:\\VSCode\\CameraCtrl\\movie_render.py``: a header line, then 12 matrix numbers
+per frame, then one JSON record per sequence with the same key names), but the
+matrix itself is a **Blender** world-to-camera matrix, so a viewer can invert it
+and draw the camera exactly as the scene has it:
 
 TXT
     Header line::
 
         frame focal_length d1 d2 d3 d4 d5 r00 r01 r02 tx r10 r11 r12 ty r20 r21 r22 tz
 
-    then one line per frame with 12 numbers: the first three rows of the
-    **world-to-camera** matrix in the OpenCV convention (``+X`` right, ``+Y``
-    down, ``+Z`` forward).  ``d1..d5`` are reserved distortion slots and stay 0,
+    then one line per frame with 12 numbers: the rows of the world-to-camera
+    matrix ``[R^T | -R^T c]``, where the rows are the camera's own axes in world
+    space -- row 0 ``+X`` right, row 1 ``+Y`` up, row 2 ``+Z`` back, so the view
+    direction is ``-row2``.  ``det(R)`` is ``+1`` and ``inv([R|t])`` is the
+    camera-to-world matrix.  ``d1..d5`` are reserved distortion slots and stay 0,
     exactly as in the reference script, which skips the header when parsing.
 
 JSON
@@ -43,21 +48,24 @@ TRAJECTORY_HEADER = (
     "r00 r01 r02 tx r10 r11 r12 ty r20 r21 r22 tz"
 )
 
-#: Axis flip that converts Blender's camera matrix columns into the OpenCV
-#: camera basis, in the same row layout ``movie_render.py`` emits.
+#: The trajectory keeps Blender's **own** camera axes, with no axis flip at all:
+#: the three rows are the camera's local axes resolved in world space, so
+#: ``inv(W2C)`` is exactly the camera-to-world matrix ``matrix_world`` prints.
 #:
-#: Let ``M`` be the camera-to-world matrix with columns ``(R, U, B)`` where
-#: ``B`` is Blender's local ``+Z`` (``-B`` is the view direction).  The three
-#: emitted rows are the OpenCV axes resolved in world space::
+#: It used to flip only the ``Y`` row (to make OpenCV's ``+Y`` down) which turns a
+#: rotation into a **reflection** -- ``det = -1``, measured on a real sequence --
+#: and no consumer can invert a reflection back into a camera pose.  A viewer that
+#: did (``visualize_trajectory.py``) therefore drew a mirrored camera: correct
+#: position, wrong orientation.
 #:
-#:   row 0 (OpenCV +X) =  R
-#:   row 1 (OpenCV +Y) = -U          (Blender's +Y is up, OpenCV's is down)
-#:   row 2 (OpenCV +Z) =  B          (keeps the reference implementation's sign)
+#:     row 0 = +X  right
+#:     row 1 = +Y  up          (world up when the camera is level)
+#:     row 2 = +Z  back        (the view direction is ``-row2``)
 #:
-#: Together with ``-R^T c`` translations this reproduces the reference exactly,
-#: and the defining invariant -- the camera's own world position maps to the
-#: camera-space origin -- is asserted in the tests.
-_OPENCV_FLIP = (1.0, -1.0, 1.0)
+#: A consumer that wants OpenCV's ``+Y`` down / ``+Z`` forward applies
+#: ``diag(1, -1, -1)`` to both the rotation and the translation, which keeps the
+#: determinant at ``+1``.
+_TRAJECTORY_AXES = (1.0, 1.0, 1.0)
 
 
 @dataclass
@@ -103,29 +111,35 @@ def camera_pose_to_world_matrix(position: Sequence[float], quaternion: Sequence[
 
 
 def world_to_camera_row(matrix: Sequence[Sequence[float]]) -> "tuple[float, ...]":
-    """Blender camera-to-world 4x4 -> OpenCV world-to-camera 3x4 (row major).
+    """Blender camera-to-world 4x4 -> Blender world-to-camera 3x4 (row major).
 
-    The returned rows are the OpenCV camera axes in world space followed by the
-    corresponding translation terms of ``W2C = [R^T | -R^T c]``, i.e. exactly the
-    layout ``movie_render.py`` writes::
+    The returned rows are the camera's own axes in world space followed by the
+    matching translation terms of ``W2C = [R^T | -R^T c]``::
 
-        r00 r01 r02 tx   <- OpenCV +X (right)
-        r10 r11 r12 ty   <- OpenCV +Y (down)
-        r20 r21 r22 tz   <- OpenCV +Z (back; the view direction is -Z)
+        r00 r01 r02 tx   <- the camera's local +X (right)
+        r10 r11 r12 ty   <- the camera's local +Y (up)
+        r20 r21 r22 tz   <- the camera's local +Z (back; the view direction is -Z)
 
-    Invariant (asserted in the tests): transforming the camera's own world
-    position through this row yields ``(0, 0, 0)``.
+    This is a **proper** world-to-camera matrix in Blender coordinates: ``det(R)``
+    is ``+1`` and ``inv(W2C)`` is the camera-to-world matrix the scene reports, so a
+    viewer can invert it and draw the camera as it really is.  A point *in front of*
+    the camera therefore has **negative** ``z`` in camera space (Blender looks down
+    local ``-Z``); flip rows 1 and 2 of both blocks for OpenCV's convention.
+
+    Invariants (asserted in the tests): transforming the camera's own world position
+    through this row yields ``(0, 0, 0)``, and inverting the 3x4 reproduces
+    ``camera_pose_to_world_matrix(position, quaternion)``.
     """
-    # OpenCV axes expressed in world space.  Blender's camera matrix columns are
-    # (right, up, back) with back = -view.
+    # Blender's camera matrix columns are (right, up, back); the rows below are
+    # those same axes -- no swapping, no sign flip.
     right = vec_normalized([
-        matrix[axis][0] * _OPENCV_FLIP[0] for axis in range(3)
+        matrix[axis][0] * _TRAJECTORY_AXES[0] for axis in range(3)
     ])
-    down = vec_normalized([
-        matrix[axis][1] * _OPENCV_FLIP[1] for axis in range(3)
+    up = vec_normalized([
+        matrix[axis][1] * _TRAJECTORY_AXES[1] for axis in range(3)
     ])
-    forward = vec_normalized([
-        matrix[axis][2] * _OPENCV_FLIP[2] for axis in range(3)
+    back = vec_normalized([
+        matrix[axis][2] * _TRAJECTORY_AXES[2] for axis in range(3)
     ])
     translation = (float(matrix[0][3]), float(matrix[1][3]), float(matrix[2][3]))
 
@@ -134,8 +148,8 @@ def world_to_camera_row(matrix: Sequence[Sequence[float]]) -> "tuple[float, ...]
 
     return (
         right[0], right[1], right[2], -dot(right, translation),
-        down[0], down[1], down[2], -dot(down, translation),
-        forward[0], forward[1], forward[2], -dot(forward, translation),
+        up[0], up[1], up[2], -dot(up, translation),
+        back[0], back[1], back[2], -dot(back, translation),
     )
 
 
@@ -314,8 +328,11 @@ class SequenceMetadata:
                 "mode": "sampled" if sample_step > 1 else "all_frames",
                 "step": sample_step,
                 "row_count": len(trajectory),
-                "coordinate_system": "opencv_world_to_camera",
-                "rotation_representation": "3x3 rotation matrix, column-major rows r00..r22",
+                "coordinate_system": "blender_world_to_camera",
+                "rotation_representation": "3x3 rotation matrix, rows r00..r22 (camera axes: +X right, +Y up, +Z back)",
+                "view_axis": "the camera looks down local -Z, i.e. -(r20 r21 r22)",
+                "inverse": "inv([R|t]) is the camera-to-world matrix (Blender matrix_world)",
+                "opencv_equivalent": "flip rows 1 and 2 of the rotation and the translation for +Y down / +Z forward",
                 "units": "blender_world_units (metres by default)",
                 "distortion_slots": "d1..d5 are reserved and always 0",
                 "matches_reference": "E:\\VSCode\\CameraCtrl\\movie_render.py",

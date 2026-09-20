@@ -24,13 +24,14 @@ uses (see [Version compatibility](#version-compatibility)).
 6. [Output layout](#output-layout)
 7. [Configuration reference](#configuration-reference)
 8. [Motion templates](#motion-templates)
-9. [Camera validation and auto-search](#camera-validation-and-auto-search)
-10. [Characters](#characters)
-11. [Remote / render-farm notes](#remote--render-farm-notes)
-12. [Testing](#testing)
-13. [Architecture](#architecture)
-14. [Version compatibility](#version-compatibility)
-15. [Known limitations](#known-limitations)
+9. [Compound shots](#compound-shots)
+10. [Camera validation and auto-search](#camera-validation-and-auto-search)
+11. [Characters](#characters)
+12. [Remote / render-farm notes](#remote--render-farm-notes)
+13. [Testing](#testing)
+14. [Architecture](#architecture)
+15. [Version compatibility](#version-compatibility)
+16. [Known limitations](#known-limitations)
 
 ---
 
@@ -222,8 +223,8 @@ what survives.
   Each `sequence_config.json` records `source_blend` (absolute, the copy),
   `source_scene_rel` (`scene/<name>.blend`, relative to the project folder) and
   `source_blend_original` (where the scene came from). The renderer prefers the
-  absolute path, falls back to the relative one when the folder has moved, and
-  finally to `--path-map`.
+  absolute path, falls back to the relative one resolved against the project root
+  that `project.json` marks (or `--project-root`), and finally to `--path-map`.
 * **Save validation report**, **Overwrite existing**, **Reuse existing sequences**,
   **Cameras** (`all`, names, or indices), and the render defaults recorded for the
   renderer.
@@ -428,15 +429,45 @@ single-GPU machine for scenes like that.
 Exit codes: `0` success (including "everything was already rendered"),
 `1` at least one sequence failed, `2` no sequences found, `3` unexpected error.
 
-Supported flags: `--input`, `--input-root`, `--output`, `--output-root`,
-`--recursive`, `--scene-filter`, `--motion-filter`, `--sequence-filter`,
-`--frame-start`, `--frame-end`, `--resolution-x`, `--resolution-y`,
-`--resolution-percentage`, `--fps`, `--engine`, `--samples`, `--device`,
-`--video-format`, `--codec`, `--crf`, `--video-bitrate`, `--trajectory-mode`,
-`--trajectory-step`, `--overwrite`, `--skip-existing`, `--no-skip-existing`,
-`--dry-run`, `--list`, `--workers`, `--keep-frames`, `--frames-output`,
-`--log-level`, `--log-file`, `--config`, `--path-map`, `--check-assets`,
-`--no-check-assets`, `--asset-report`, `--flat`, `--timeout`.
+Supported flags: `--input`, `--input-root`, `--project-root`, `--output`,
+`--output-root`, `--recursive`, `--scene-filter`, `--motion-filter`,
+`--sequence-filter`, `--frame-start`, `--frame-end`, `--resolution-x`,
+`--resolution-y`, `--resolution-percentage`, `--fps`, `--engine`, `--samples`,
+`--device`, `--video-format`, `--codec`, `--crf`, `--video-bitrate`,
+`--trajectory-mode`, `--trajectory-step`, `--overwrite`, `--skip-existing`,
+`--no-skip-existing`, `--dry-run`, `--list`, `--workers`, `--keep-frames`,
+`--frames-output`, `--log-level`, `--log-file`, `--config`, `--path-map`,
+`--check-assets`, `--no-check-assets`, `--asset-report`, `--flat`, `--timeout`.
+
+### Rendering on another machine (Linux render node)
+
+The project folder is relocatable, so a render node needs Blender and nothing else
+— no add-on installation, no path mapping:
+
+```bash
+# ship it
+scp -r blender_camera_20260213 user@node:/data/proj/
+# render it there
+ssh node
+cd /data/proj/blender_camera_20260213
+BLENDER=/opt/blender-5.2.2-linux-x64/blender bash render_project.sh
+```
+
+Why this works with no arguments: the renderer *is* in the folder, it imports the
+package beside it, and each sequence finds its scene through `source_scene_rel`
+(`scene/<name>.blend`) because `project.json` marks the project root. The recorded
+`source_blend` is an absolute path of the authoring machine (`E:/…`), so it cannot
+exist on the node — the relative form is what carries the shot across. If the
+folder was reorganised, say where it is with `--project-root <dir>`; `--path-map`
+is then only needed for the assets *inside* those `.blend` files.
+
+`--list` prints, per sequence, which scene file it will open and marks it
+`scene missing` when it cannot find one, which makes it the right first command on
+a new node:
+
+```bash
+blender -b -P render_sequences.py -- --input-root sequence --output-root video --list
+```
 
 ### Making the project folder independent of the authoring machine
 
@@ -580,8 +611,11 @@ second block adds the video-render details:
   "frames": {"frame_start": 0, "frame_end": 80, "frame_count": 81, "fps": 24.0},
   "render": {"engine": "BLENDER_WORKBENCH", "resolution": [320, 180], "fps": 24.0},
   "trajectory_export": {
-    "coordinate_system": "opencv_world_to_camera",
-    "rotation_representation": "3x3 rotation matrix rows r00..r22",
+    "coordinate_system": "blender_world_to_camera",
+    "rotation_representation": "3x3 rotation matrix rows r00..r22 (camera axes: +X right, +Y up, +Z back)",
+    "view_axis": "the camera looks down local -Z, i.e. -(r20 r21 r22)",
+    "inverse": "inv([R|t]) is the camera-to-world matrix (Blender matrix_world)",
+    "opencv_equivalent": "flip rows 1 and 2 of the rotation and the translation for +Y down / +Z forward",
     "units": "blender_world_units (metres by default)",
     "distortion_slots": "d1..d5 are reserved and always 0"
   }
@@ -590,20 +624,38 @@ second block adds the video-render details:
 
 ### Camera trajectory TXT
 
-Header line and one row per frame, byte-compatible with the reference script
+Header line and one row per frame, same column layout as the reference script
 (which skips the `#` comment block):
 
 ```text
 # sequence_id=sequence_000001
 # scene=room001 motion=dolly_in_01_standard camera=Camera
 # frames=0..80 fps=24
-# coordinate_system=opencv_world_to_camera (row0=+X right, row1=+Y down, row2=+Z)
+# coordinate_system=blender_world_to_camera (row0=+X right, row1=+Y up, row2=+Z back)
 # rotation_representation=3x3 rotation matrix, rows r00..r22, column-vector convention
+# view_axis=the camera looks down its local -Z, i.e. -(r20 r21 r22)
+# inverse=inv([R|t]) is the camera-to-world matrix (Blender matrix_world)
+# opencv_equivalent=flip rows 1 and 2 of R and t for +Y down / +Z forward
 # translation=tx ty tz from W2C = [R^T | -R^T * camera_position]
 # units=blender_world_units (metres by default); distortion d1..d5 reserved, always 0
 frame focal_length d1 d2 d3 d4 d5 r00 r01 r02 tx r10 r11 r12 ty r20 r21 r22 tz
 0 35 0 0 0 0 0 0.00000006 -1.00000000 ... -0.00000010
 ```
+
+**The matrix is Blender's own**, so a viewer can invert it and draw the camera as
+the scene has it (`tools/visualize_trajectory.py` does exactly that: `inv(w2c)` →
+frustum along local `-Z`, up = local `+Y`, world `Z` up — no flags needed):
+
+* rows are the camera's axes in world space — `row0 = +X` right, `row1 = +Y` up,
+  `row2 = +Z` back, so the **view direction is `-row2`**;
+* `det(R) = +1` (a proper rotation: `inv` gives a camera, not a mirror) and
+  `inv([R|t])` equals Blender's `matrix_world` — both asserted by the tests;
+* a point *in front of* the camera therefore has **negative** `z` in camera space
+  (Blender looks down local `-Z`);
+* for OpenCV's `+Y` down / `+Z` forward convention, flip rows 1 **and** 2 of the
+  rotation and the translation (`diag(1, -1, -1)`), which keeps the determinant
+  at `+1`. Flipping only row 1 — what this export used to do to imitate the
+  reference — produces a reflection (`det = -1`) that no viewer can invert.
 
 `--trajectory-mode sampled --trajectory-step N` exports every N-th frame
 (the first and last frame are always included).
@@ -640,12 +692,8 @@ One JSON document drives both the panel and the CLI. See
     "frame_scale": 1.0,
     "interpolation": "BEZIER",
     "unit_scale": {
-      "location_scale": 0.01,
       "fps": 24.0,
-      "rotation_order": "XYZ",
-      "yaw_axis": "Z", "pitch_axis": "X", "roll_axis": "Z",
-      "yaw_sign": -1.0, "pitch_sign": 1.0, "roll_sign": -1.0,
-      "location_forward": -1.0, "location_right": 1.0, "location_up": 1.0
+      "rotation_order": "XYZ"
     }
   },
   "validation": {
@@ -675,8 +723,9 @@ One JSON document drives both the panel and the CLI. See
 
 Keys are accepted in `snake_case`, `camelCase`, `kebab-case` or `UPPER_CASE`.
 Unknown keys produce a warning instead of failing, so a config written for a
-newer build still runs — including the removed `batch.save_sequence_blend`, which
-is now ignored rather than honoured (no sequence stores a scene copy any more).
+newer build still runs — including the removed `batch.save_sequence_blend` (no
+sequence stores a scene copy any more) and the Unreal-era `motion.unit_scale`
+mapping keys, all of which are now ignored rather than honoured.
 
 ---
 
@@ -690,7 +739,7 @@ motion type is hard-coded in Python, so adding a motion means adding a JSON entr
 1. `motion.template_path` (panel field / `--templates`) — an error if unreadable.
 2. `motion.template_data` (inline array in the config).
 3. `$MOTION_PIPELINE_TEMPLATES`.
-4. The bundled `config/camera_motion_templates.json`, then the known reference
+4. The bundled `templates/camera_motion_templates.json`, then the known reference
    locations:
    `E:\UE\DataGenScenes\Plugins\MetaHumanScenePipeline\Templates`,
    `E:\UE\MetaHumanScenePipeline\Templates`, — a warning only, falling back to
@@ -700,9 +749,9 @@ motion type is hard-coded in Python, so adding a motion means adding a JSON entr
 
 ```json
 [{"id": "dolly_in_01_standard",
-  "keys": [{"frame": 0,  "location": [0, 0, 0],   "rotation": [0, 0, 0], "focal": 35},
-           {"frame": 40, "location": [150, 0, 0], "rotation": [0, 0, 0], "focal": 35},
-           {"frame": 80, "location": [300, 0, 0], "rotation": [0, 0, 0], "focal": 35}]}]
+  "keys": [{"frame": 0,  "location": [0, 0, 0],    "rotation": [0, 0, 0], "focal": 35},
+           {"frame": 40, "location": [0, 0, -1.5], "rotation": [0, 0, 0], "focal": 35},
+           {"frame": 80, "location": [0, 0, -3.0], "rotation": [0, 0, 0], "focal": 35}]}]
 ```
 
 `{"templates": [...]}`, `{"motion_templates": [...]}`, `{name: {...}}` and a
@@ -711,29 +760,55 @@ single template object are all accepted, as are the aliases `name`/`template` fo
 `angles`/`rot` for `rotation`, and `lens`/`focal_length` for `focal`. Extra
 per-keyframe or per-template fields are preserved in `parameters`.
 
-### Coordinate contract
+### Coordinate contract — Blender, with no conversion
 
-Template `location` is an offset in the camera's **own frame**, using Unreal's
-axis convention (**X = forward, Y = right, Z = up**) and centimetres, and
-`rotation` is `[roll, pitch, yaw]` in degrees. `motion.unit_scale` maps that onto
-Blender (`-Z` forward, `+X` right, `+Y` up):
+Templates are authored in **Blender coordinates** and used **verbatim**: no axis
+swap, no sign flip, no unit rescaling. The numbers are the camera's own local
+transform, so a template reads like a pose you would set on the camera itself.
 
-| Template | Becomes | Default |
-|---|---|---|
-| location scale | centimetres — metres | `0.01` |
-| `location_forward` | Unreal +X — Blender **−Z** | `-1` |
-| `location_right` | Unreal +Y — Blender **+X** | `+1` |
-| `location_up` | Unreal +Z — Blender **+Y** | `+1` |
-| `yaw` | about world **+Z** | sign `-1` |
-| `pitch` | about the camera's local **X** | sign `+1` |
-| `roll` | about the camera's local **Z** (the view axis) | sign `-1` |
+| Template | Meaning |
+|---|---|
+| `location` | offset in the camera's **own frame**, in **metres**: `+X` right, `+Y` up, `+Z` backwards — so **`-Z` is forward** (a 3 m push is `[0, 0, -3]`) |
+| `rotation` | `[rx, ry, rz]` in **degrees** about the same local axes: `rx` tilts, `ry` turns left/right, `rz` rolls the frame. Composed in `motion.unit_scale.rotation_order` (default `XYZ`, Blender's own order) |
+| `focal` | millimetres |
 
-Every one of those is asserted by
-[`tests/probe_axes.py`](tests/probe_axes.py) and locked down in
-`tests/test_motion_templates.py` — with the defaults, `dolly_in` really does push
-the camera forward, `pan_right` really does turn it right, `pedestal_up` really
-does raise it, `truck_right` really does strafe it right, and `roll` really does
-spin the frame without changing the aim.
+The offset is applied **in the camera's starting orientation**, so "0.5 m to my
+right, 1.2 m up, 3 m forward" is `[0.5, 1.2, -3]` no matter how the camera is aimed
+in the world.
+
+Every axis is asserted by [`tests/probe_axes.py`](tests/probe_axes.py) and locked
+down in `tests/test_motion_templates.py` — `dolly_in` really does push the camera
+forward, `pan_right` really does turn it right, `pedestal_up` really does raise it,
+`truck_right` really does strafe it right, and `roll` really does spin the frame
+without changing the aim.
+
+`motion.unit_scale` therefore carries only the timeline settings (`fps`,
+`rotation_order`). The Unreal-era keys (`location_scale`, `location_forward/right/up`,
+`yaw_axis`/`pitch_axis`/`roll_axis` and their signs) are gone; a config that still
+sets them gets one warning naming the migration script, and they are ignored.
+
+#### Migrating a template set written for Unreal
+
+An Unreal set (``location`` in centimetres along `X` forward / `Y` right / `Z` up,
+``rotation`` as `[roll, pitch, yaw]` with yaw about the **world** up axis) converts
+once, offline:
+
+```bash
+python tests/migrate_unreal_templates.py --input templates.json --check     # report only
+python tests/migrate_unreal_templates.py --input templates.json --in-place  # keeps a backup
+python tests/migrate_unreal_templates.py --input templates.json --output blender.json
+```
+
+`location [forward, right, up]` cm → `[right, up, -forward]` m, and
+`rotation [roll, pitch, yaw]` → local `[pitch, -yaw, -roll]`; ids, frames, focals
+and every extra field are preserved. The script refuses to convert a document that
+already looks Blender-native (offsets in metres are small) unless `--force` is
+given, which is what makes it safe to run twice by accident.
+
+The bundled `templates/camera_motion_templates.json`, the test set beside it and the
+project's own reference document were migrated with it; the
+`*.unreal_backup.json` copies left next to them are the pre-migration originals
+(they are never discovered or loaded — discovery looks for exact file names).
 
 ### What gets keyed: the bake contract
 
@@ -807,6 +882,94 @@ across 16 families: `dolly_in`, `dolly_out`, `fixed`, `hitchcock`, `pan_left`,
 `truck_left`, `truck_right`, `zoom_in`, `zoom_out` (5 variants each, except
 `hitchcock` which has 10). `--motion-filter` / the panel's **Motion filter**
 selects a subset by id or glob.
+
+---
+
+## Compound shots
+
+A **compound shot** plays several base templates one after another inside
+**one sequence, with the same total frame range as a single template** — 0..80 frames
+for the reference set. The range is split into one window per part, each part is
+compressed into its own window, and each part starts where the previous one ended, so
+`pan_right + hitchcock` pans right over the first windows and then pushes in, without a
+cut and without getting any longer.
+
+```
+pan_right_01_standard + hitchcock_01_base_forward_standard + truck_right_01_standard
+frames 0..80 (81 samples, same as one template)
+  [1] frames  0..26   pan_right : turns 30.00 deg, moves 0.000 m
+  [2] frames 27..53   hitchcock : pushes 3.400 m,   turns 0.00 deg   (junction: 0.00 mm)
+  [3] frames 54..80   truck_right: strafes 3.000 m, turns 0.00 deg   (junction: 0.00 mm)
+```
+
+A compound is **flattened into one ordinary template** whose keys are the chained
+poses in the anchor frame, so validation, the camera search, the bake, the metadata
+and the renderer treat it exactly like any other template — and its trajectory is as
+continuous as a single shot's (largest per-frame move in the example: 131 mm).
+
+### Configuring it (panel: **Sequence output**)
+
+1. **Enable compound shots** reveals the sub-panel.
+2. **Compound type**
+   * **Full compound** — every ordering of every loaded template: ``n!`` sequences.
+   * **Partial compound** — *Templates per sequence* ``x`` (2..10) and *Sequence
+     count* ``N``: ``N`` distinct sequences, each holding exactly ``x`` of the ``n``
+     loaded templates, drawn from the ``x! * C(n, x)`` possible orderings with
+     *Random seed* (so a re-run reproduces the same set).
+3. **Compound output** — **With base shots** (compounds *and* the single-template
+   sequences), **Compound shots only**, or **Base shots only** (the compound
+   configuration is ignored).
+
+The sub-panel also states the exact counts before anything runs (`Full compound: 6
+sequence(s) = 3!`), and refuses an impossible configuration with advice instead of
+starting it:
+
+* ``n!`` is capped by ``composite.max_full_sequences`` (5040 = 7! by default). A full
+  compound of the 80-template reference set is 80! — nobody can render that, so
+  narrow the template set with the **Motion filter** (e.g. 3 templates → 6 compounds)
+  or switch to a partial compound.
+* A partial compound needs at least 2 and at most 10 distinct templates per sequence,
+  cannot ask for more orderings than exist (``x! * C(n, x)``), and is capped by
+  ``composite.max_partial_sequences`` (100000).
+
+### What a compound produces
+
+| | |
+|---|---|
+| Folder | one ``scene/compound_<part>+<part>[...]`` per combination (shortened with a hash when it would be unwieldy) |
+| Frames | identical to a single template: same ``frame_start``, ``frame_end`` and ``frame_count`` |
+| ``sequence_config.json`` | ``motion.parameters.compound`` = ``{parts, windows, range, index}`` |
+| Everything else | exactly like any other sequence: same artifacts, same renderer, same trajectory JSON/TXT |
+
+### CLI and config
+
+```bash
+# every ordering of a 3-template subset, next to the base shots
+blender -b -P motion_pipeline_cli.py -- \
+    --scenes "D:\scenes\room001.blend" --output-root "D:\projects" \
+    --motion-filter "pan_right_01_standard" --motion-filter "hitchcock_01_base_forward_standard" \
+    --motion-filter "truck_right_01_standard" \
+    --compound --compound-mode full --compound-output with_base
+
+# 12 random-but-reproducible 4-template compounds, compounds only
+blender -b -P motion_pipeline_cli.py -- \
+    --config batch.json --compound --compound-mode partial \
+    --compound-types 4 --compound-count 12 --compound-seed 7 --compound-output only_compound
+```
+
+```json
+"composite": {
+  "enabled": true, "mode": "partial",
+  "types_per_sequence": 4, "sequence_count": 12, "seed": 7,
+  "output_mode": "with_base",
+  "max_full_sequences": 5040, "max_partial_sequences": 100000
+}
+```
+
+``--dry-run`` lists the compound names and the effective sequence count before
+anything is written, and ``tests/probe_template_contract.py`` understands compounds:
+it checks each one's frame range, windows and junctions (a cut-sized step between two
+parts is reported as "the parts are not chained").
 
 ---
 
@@ -942,10 +1105,10 @@ not been produced from real MetaHuman or Blender rigs here.** See
 ## Testing
 
 ```bash
-# Everything (pure suites + Blender suites) — 208 cases
+# Everything (pure suites + Blender suites) — 232 cases
 blender -b -P blender_camera_motion_pipeline/tests/run_blender_tests.py
 
-# Pure suites only, no Blender required (118 cases)
+# Pure suites only, no Blender required (136 cases)
 python blender_camera_motion_pipeline/tests/run_blender_tests.py
 
 # Individual suites (each one also runs on its own)
@@ -965,6 +1128,10 @@ blender -b -P blender_camera_motion_pipeline/tests/smoke_render.py
 # Full end-to-end acceptance run through the CLI + renderer
 blender -b -P blender_camera_motion_pipeline/tests/verify_end_to_end.py
 
+# Convert an Unreal-coordinate template set to Blender coordinates (once, offline)
+python blender_camera_motion_pipeline/tests/migrate_unreal_templates.py \
+    --input templates.json --check
+
 # Bake algebra vs mathutils, for random rigs / parent offsets / poses
 blender -b -P blender_camera_motion_pipeline/tests/probe_bake_math.py
 
@@ -979,6 +1146,10 @@ blender -b -P blender_camera_motion_pipeline/tests/probe_icons.py
 
 # Does every sequence in a generated tree render the path it recorded?
 blender -b -P blender_camera_motion_pipeline/tests/probe_all_sequences.py -- "<sequence root>"
+
+# Does every sequence match the template numbers it was made from? (pure Python)
+python blender_camera_motion_pipeline/tests/probe_template_contract.py -- \
+    --sequence-root "<generated tree>" --templates "<templates.json>"
 
 # What makes EEVEE slow on a given sequence (raytracing, lights, polygons)
 blender -b -P blender_camera_motion_pipeline/tests/probe_render_cost.py -- "<sequence.blend>"
@@ -1002,13 +1173,14 @@ tracebacks.
 | `test_path_utils` | 16 | pass |
 | `test_config` | 18 | pass |
 | `test_project_layout` | 15 | pass |
-| `test_motion_templates` | 31 | pass |
-| `test_camera_validation` | 38 | pass |
+| `test_motion_templates` | 33 | pass |
+| `test_motion_composite` | 15 | pass |
+| `test_camera_validation` | 39 | pass |
 | `test_animation_api` | 10 | pass |
 | `test_addon_lifecycle` | 10 | pass |
 | `test_render_workflow` | 18 | pass |
-| `test_blender_integration` | 52 | pass |
-| **Total** | **208** | **pass** |
+| `test_blender_integration` | 58 | pass |
+| **Total** | **232** | **pass** |
 
 `tests/static_check.py` also reports no unused imports or leftover debug markers
 across every Python file in the package, and one integration case drives every
@@ -1052,13 +1224,17 @@ blender_camera_motion_pipeline/
 ├── panels.py sidebar panels and the two UILists
 ├── preferences.py add-on preferences, durable task status
 ├── motion_pipeline_cli.py headless generation CLI
+├── templates/             the motion template documents (data, not code)
+│   ├── camera_motion_templates.json       the 80-template reference set
+│   ├── camera_motion_templates_light.json 17-template subset
+│   ├── camera_motion_templates_test.json  one-template smoke set
+│   └── *.unreal_backup.json               pre-migration Unreal originals
 ├── config/
 │   ├── models.py typed config dataclasses, lenient parsing, validation
-│   ├── defaults.py defaults + template discovery
+│   ├── defaults.py defaults + template discovery (templates/ -> legacy config/)
 │   ├── panel_state.py the remembered panel configuration
 │   ├── schema.json        JSON schema
-│   ├── example_config.json
-│   └── camera_motion_templates.json bundled fallback set
+│   └── example_config.json
 ├── core/                  orchestration (needs bpy)
 │   ├── scene_loader.py discovery, de-duplication, safe loading
 │   ├── blender_context.py camera snapshots, geometry harvest, restore

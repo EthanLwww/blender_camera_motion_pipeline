@@ -53,10 +53,12 @@ SKIP_DEBUG_SCAN = {
     "probe_scene.py",
     "probe_sequence_accuracy.py",
     "probe_settings_persistence.py",
+    "probe_template_contract.py",    # a probe reports what it measured
     "smoke_render.py",
     "motion_pipeline_cli.py",
     "render_sequences.py",
     "pack_textures.py",          # a standalone command-line tool: printing is its UI
+    "migrate_unreal_templates.py",   # a standalone migration tool: same
     "operators.py",
     "test_blender_integration.py",
     "test_render_workflow.py",   # reports fixture setup

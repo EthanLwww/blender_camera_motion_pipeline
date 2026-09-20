@@ -5,6 +5,14 @@ The project brief points at
 but explicitly warns that the real layout may differ, so discovery probes a
 list of candidates and also accepts an override through the
 ``MOTION_PIPELINE_TEMPLATES`` environment variable.
+
+The copy that ships with the add-on lives in the package's own ``templates/``
+folder, beside the code that reads it:
+``<package>/templates/camera_motion_templates.json`` (plus the light and test
+sets and the pre-migration ``*.unreal_backup.json`` originals).  Builds before
+that folder existed kept the same files in ``config/``, which is still probed --
+last -- so an install that was upgraded in place and left a copy behind keeps
+working.
 """
 
 from __future__ import annotations
@@ -30,9 +38,13 @@ TEMPLATE_DIR_CANDIDATES = (
     r"E:\VSCode\CameraCtrl",
 )
 
-#: Optional extra probe: a copy shipped beside this package.
+#: The dedicated folder the add-on ships its template documents in.
 _HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_BUNDLED_DIR = os.path.join(_HERE, "config")
+_BUNDLED_DIR = os.path.join(_HERE, "templates")
+#: Where they used to live; probed after the dedicated folder, never before it.
+_LEGACY_BUNDLED_DIR = os.path.join(_HERE, "config")
+#: Bundled probes, in order.
+BUNDLED_DIRS = (_BUNDLED_DIR, _LEGACY_BUNDLED_DIR)
 
 
 def discover_template_path() -> str:
@@ -50,7 +62,7 @@ def discover_template_path() -> str:
         candidate = normalize_path(override)
         if os.path.isfile(candidate):
             return candidate
-    for directory in (*TEMPLATE_DIR_CANDIDATES, _BUNDLED_DIR):
+    for directory in (*TEMPLATE_DIR_CANDIDATES, *BUNDLED_DIRS):
         if not os.path.isdir(directory):
             continue
         for filename in TEMPLATE_FILENAMES:
