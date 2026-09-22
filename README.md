@@ -208,14 +208,21 @@ what survives.
 
   | Folder / file | What it is |
   |---|---|
-  | `sequence/` | the sequence tree — what the renderer reads (`--input-root`) |
-  | `scene/` | a copy of every source `.blend` the sequences are replayed onto |
-  | `video/` | render output (`--output-root`) |
-  | `render_sequences.py` | the headless renderer |
-  | `pack_textures.py` | optional: pack the scene copies so the folder needs no asset paths |
-  | `blender_camera_motion_pipeline/` | the package the renderer imports (nothing to install) |
+  | `sequence/` | the sequence tree — what the renderer reads |
+  | `scene/` | a copy of every source `.blend` the sequences are replayed onto (byte copy: textures are never downscaled or repacked) |
+  | `video/` | render output |
   | `project.json`, `RENDER_README.md` | what the folder is, and the exact render command |
-  | `render_project.bat` / `.sh` | one-click launchers (`BLENDER=/path/to/blender` when it is not on `PATH`) |
+
+  The folder is **data only**. The renderer and the package live in the render image
+  (`docker_blender/`, `/opt/mpp/blender_camera_motion_pipeline`); `render-all.sh` there
+  uses the project's copy when one exists and the image's otherwise, so shipping a
+  second copy per project only added ~2 MB and two versions to keep in sync. Render it
+  with:
+
+  ```bash
+  render-all.sh <project>/sequence            # videos land in <project>/video
+  render-all.sh <project>/sequence <output>   # or write them somewhere else
+  ```
 
   That folder is the unit you zip to a render node. The panel shows the exact path it
   will create under the folder field, and *Open project folder* opens it.
@@ -350,21 +357,29 @@ scene copy any more, so there is nothing to switch off.
 
 ## Headless rendering
 
-Rendering a generated project needs nothing but the project folder::
+A generated project folder is data only, so the renderer comes from the render image
+(`docker_blender/`). One command does the whole folder:
 
 ```bash
-# Render every sequence in a generated project (the folder renders itself)
-blender -b -P "<project>\render_sequences.py" -- \
-    --input-root "<project>\sequence" \
-    --output-root "<project>\video" \
-    --recursive
+render-all.sh <project>/sequence            # videos land in <project>/video
+render-all.sh <project>/sequence <output>   # or write them somewhere else (use mounted storage)
 ```
 
-On the render node that is `render_project.sh` / `render_project.bat` (set
-`BLENDER` when Blender is not on `PATH`), and `RENDER_README.md` in the project
-folder repeats the commands. The renderer is the same file as
-`render/render_sequences.py` in this package; both resolve the package relative to
-themselves, so a copy beside the scripts works too.
+It reads every `sequence_config.json` below the sequence root, uses the settings each
+sequence recorded, prints a preflight + inventory, and writes
+`render_all_<stamp>.log` and `render_all_<stamp>_summary.txt` next to the videos.
+Exit codes: `0` all rendered, `1` something failed, `2` preflight/usage problem,
+`3` nothing to render.
+
+Without the image, use the renderer from this package (same file, resolves its own
+package):
+
+```bash
+blender -b -noaudio --factory-startup -P render/render_sequences.py -- \
+    --input-root "<project>/sequence" \
+    --output-root "<project>/video" \
+    --recursive
+```
 
 ```bash
 # Render the file Blender already has open
@@ -447,17 +462,16 @@ The project folder is relocatable, so a render node needs Blender and nothing el
 ```bash
 # ship it
 scp -r blender_camera_20260213 user@node:/data/proj/
-# render it there
+# render it there (inside the render image; --output-root must be on mounted storage)
 ssh node
-cd /data/proj/blender_camera_20260213
-BLENDER=/opt/blender-5.2.2-linux-x64/blender bash render_project.sh
+render-all.sh /data/proj/blender_camera_20260213/sequence /data/out/video
 ```
 
-Why this works with no arguments: the renderer *is* in the folder, it imports the
-package beside it, and each sequence finds its scene through `source_scene_rel`
-(`scene/<name>.blend`) because `project.json` marks the project root. The recorded
-`source_blend` is an absolute path of the authoring machine (`E:/…`), so it cannot
-exist on the node — the relative form is what carries the shot across. If the
+Why this works with no arguments: each sequence finds its scene through
+`source_scene_rel` (`scene/<name>.blend`) because `project.json` marks the project
+root. The recorded `source_blend` is an absolute path of the authoring machine
+(`E:/…`), so it cannot exist on the node — the relative form is what carries the shot
+across. If the
 folder was reorganised, say where it is with `--project-root <dir>`; `--path-map`
 is then only needed for the assets *inside* those `.blend` files.
 
@@ -477,40 +491,36 @@ The sequences are fine — they carry data, not paths. The `.blend` copies in
 
 ```bash
 # A. bridge the paths on the render node (repeatable; applies to scenes and assets)
-blender -b -P "<project>/render_sequences.py" -- \
-    --input-root "<project>/sequence" --output-root "<project>/video" \
-    --recursive --path-map "E:/UE/DataGenScenes=/mnt/data/DataGenScenes"
+render-all.sh "<project>/sequence" --path-map "E:/UE/DataGenScenes=/mnt/data/DataGenScenes"
 
 # B. pack everything into the copies once, then the folder is portable
-blender -b -P "<project>/pack_textures.py" -- --scene-root "<project>/scene"
+blender -b -P /opt/mpp/blender_camera_motion_pipeline/render/pack_textures.py -- \
+    --scene-root "<project>/scene"
 ```
 
-`pack_textures.py` opens every scene copy, packs its external files, saves it
-compressed in place and writes `pack_report.json` next to the `scene/` folder
-listing what was packed and what could not be found. Missing files are reported,
-never fatal. Useful flags: `--scene <file>` (one file), `--dry-run` (report only),
-`--list`, `--no-compress`, `--report <path>`.
+`pack_textures.py` (shipped with the render image, and in this package) opens every
+scene copy, packs its external files, saves it compressed in place and writes
+`pack_report.json` next to the `scene/` folder listing what was packed and what could
+not be found. Missing files are reported, never fatal. Useful flags: `--scene <file>`
+(one file), `--dry-run` (report only), `--list`, `--no-compress`, `--report <path>`.
 
 ---
 
 ## Output layout
 
-A run writes one **project folder**: the sequence tree, the scenes it needs and the
-renderer, so the folder can be zipped to a render node as it is.
+A run writes one **slim project folder**: the sequence tree and the scenes it needs —
+data only, because the renderer comes from the render image — so the folder can be
+zipped or uploaded as it is.
 
 ```text
 D:\projects\                         <- the folder you pick (panel: Project folder)
 └── blender_camera_20260213\         <- created by the run (reused on the same day)
-    ├── project.json                 what this project is + the exact render command
+    ├── project.json                 what this project is + the render command + scene map
     ├── RENDER_README.md             the same commands, for the render node
-    ├── render_project.bat / .sh     launchers (BLENDER=... when not on PATH)
-    ├── render_sequences.py          headless renderer (root copy)
-    ├── pack_textures.py             optional: pack the scene copies
-    ├── blender_camera_motion_pipeline\   the package the renderer imports
-    ├── scene\                       a copy of every source .blend
+    ├── scene\                       a copy of every source .blend (textures untouched)
     │   └── room001.blend
-    ├── video\                       render output (--output-root)
-    └── sequence\                    the sequence tree (--input-root)
+    ├── video\                       render output
+    └── sequence\                    the sequence tree (render input)
         ├── batch_config.json        effective configuration for this run
         ├── batch_report.json        per-scene and per-sequence outcome
         ├── manifest.json            roll-up of every sequence + every failure
@@ -1196,9 +1206,9 @@ End-to-end acceptance: **10/10 stages**
 1. Build 3 fixture scenes.
 2. CLI dry-run reports the matrix.
 3. CLI generates the sequences with the real 80-template document.
-4. The project folder is self-contained (scene copies + render toolkit).
+4. The project folder is data only and self-describing (`sequence/` + `scene/` + `video/`).
 5. Generated artifacts match the documented layout.
-6. The project's *own* copy of the renderer produces the videos.
+6. The package's renderer (in production: the image's) produces the videos from it.
 7. Every video has its JSON + trajectory TXT beside it.
 8. `ffprobe` confirms H.264 and 81 frames per video.
 9. Re-running the renderer skips finished sequences and exits 0.
@@ -1244,7 +1254,7 @@ blender_camera_motion_pipeline/
 │   ├── blender_context.py camera snapshots, geometry harvest, restore
 │   ├── sequence_generator.py one sequence: validate -> search -> bake -> write
 │   ├── batch_runner.py scenes x motions x cameras x characters
-│   ├── project.py the self-contained project folder a run writes
+│   ├── project.py the slim (data-only) project folder a run writes
 │   ├── camera_animation.py the animation payload + how it is replayed
 │   ├── sequence_manager.py read-only view of the output tree
 │   └── ui_task.py incremental, cancellable timer state machine

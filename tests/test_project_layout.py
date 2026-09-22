@@ -1,21 +1,24 @@
 """Project-folder tests (pure Python, no bpy).
 
-A run writes one self-contained *project folder* rather than a bare sequence tree,
-because that folder is what gets zipped to a render node::
+A run writes one *slim* project folder rather than a bare sequence tree, because
+that folder is what gets zipped to a render node::
 
     <project root>/blender_camera_<date>/
-        sequence/   the sequence tree          (--input-root)
+        sequence/   the sequence tree          (render input)
         scene/      a copy of every source .blend
-        video/      render output              (--output-root)
-        render_sequences.py, pack_textures.py, <package>/, README, launchers
+        video/      render output
+        project.json, RENDER_README.md
+
+The folder is data only: the renderer, the package and the launchers live in the
+render image (``project.IMAGE_PACKAGE``) and are never copied into a project.
 
 These cases pin the layout, the copy semantics (idempotent, de-duplicated), the
-recorded relative scene path and the fact that scripts copied to the project root
-can still find the package.
+recorded relative scene path and the commands written into the folder's docs.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
@@ -56,7 +59,7 @@ def build_suite() -> Suite:
         equal(len(stamp), len("blender_camera_") + 8, stamp)
         ok(stamp[16:].isdigit(), stamp)
 
-    @suite.case("create() builds sequence/scene/video and ships the render toolkit")
+    @suite.case("create() builds a data-only sequence/scene/video project folder")
     def _():
         layout = project_mod.ProjectLayout.create(
             os.path.join(work, "created"), package_root=PACKAGE_ROOT
@@ -69,19 +72,17 @@ def build_suite() -> Suite:
         equal(os.path.basename(layout.scene_root), "scene")
         equal(os.path.basename(layout.video_root), "video")
 
-        # The renderer and the package it imports must be inside the project, or
-        # the folder cannot render anywhere else.
-        for name in ("render_sequences.py", "pack_textures.py"):
-            ok(os.path.isfile(os.path.join(layout.root, name)), name)
-        copied_package = os.path.join(layout.root, os.path.basename(PACKAGE_ROOT))
-        ok(os.path.isfile(os.path.join(copied_package, "__init__.py")), copied_package)
-        ok(os.path.isfile(os.path.join(copied_package, "_bootstrap.py")), copied_package)
-        ok(os.path.isfile(os.path.join(copied_package, "config", "models.py")),
-           "the package copy must be complete")
-        ok(not os.path.isdir(os.path.join(copied_package, "__pycache__")),
-           "byte-code caches must not be shipped")
-        ok(layout.toolkit["package_files"] > 20, layout.toolkit)
-        equal(layout.toolkit["missing"], [])
+        # Slim layout: the folder is data only.  The renderer and the package live
+        # in the render image (IMAGE_PACKAGE), and render-all.sh falls back to them,
+        # so a second copy per project would only add megabytes and drift.
+        for name in ("render_sequences.py", "pack_textures.py",
+                     "render_project.bat", "render_project.sh"):
+            ok(not os.path.exists(os.path.join(layout.root, name)),
+               "%s must not be copied into the project" % name)
+        ok(not os.path.exists(os.path.join(layout.root, os.path.basename(PACKAGE_ROOT))),
+           "the package must not be copied into the project")
+        equal(sorted(os.listdir(layout.root)), ["scene", "sequence", "video"],
+              "create() builds the three data folders and nothing else")
 
     @suite.case("create() refuses to guess a project folder")
     def _():
@@ -99,30 +100,24 @@ def build_suite() -> Suite:
         equal(second.root, first.root)
         ok(os.path.isfile(marker), "an existing project folder must not be wiped")
 
-    @suite.case("auto-detection ships the package itself, never a parent or a subpackage")
+    @suite.case("the slim project folder holds data only, never code")
     def _():
-        # Regression, twice over: ``core/project.py`` lives in a subpackage, so a
-        # naive walk-up for ``__init__.py`` shipped ``core/`` as "the package" (no
-        # renderer, no _bootstrap.py, and the renderer then died with
-        # ``No module named 'blender_motion_pipeline.core'``); going to the other
-        # extreme copied the whole workspace, including the package's own ``.git``
-        # (hundreds of files, permission errors, a half-finished copy).
+        # Regression: the folder used to ship the renderer, the launchers and a
+        # full copy of the package (~2 MB, 128 files per project) so a bare machine
+        # could render it.  The render image ships all of that now, and a second
+        # copy only drifted out of sync -- so the project carries data only.
         layout = project_mod.create_project(os.path.join(work, "autodetect"))
         package_name = os.path.basename(PACKAGE_ROOT)
-        equal(layout.toolkit["package_dir"], os.path.join(layout.root, package_name))
-        equal(layout.toolkit["missing"], [])
-        ok(os.path.isfile(os.path.join(layout.root, package_name, "core", "project.py")),
-           "the copied package must be complete")
-        ok(os.path.isfile(os.path.join(layout.root, "render_sequences.py")),
-           "the renderer must be copied to the project root")
-        ok(not os.path.isdir(os.path.join(layout.root, package_name, ".git")),
-           "version-control metadata must not be shipped")
+        for name in (package_name, "render_sequences.py", "pack_textures.py",
+                     "render_project.bat", "render_project.sh"):
+            ok(not os.path.exists(os.path.join(layout.root, name)),
+               "%s must not be copied into the project" % name)
         folders = sorted(
             name for name in os.listdir(layout.root)
             if os.path.isdir(os.path.join(layout.root, name))
         )
-        equal(folders, sorted([package_name, "scene", "sequence", "video"]),
-              "nothing from outside the package may be copied into the project")
+        equal(folders, ["scene", "sequence", "video"],
+              "only the three data folders may exist in a project")
 
     @suite.case("scene copies are idempotent and keep the original's timestamps")
     def _():
@@ -177,7 +172,7 @@ def build_suite() -> Suite:
         equal(layout.relative_scene(r"Z:\elsewhere\room.blend"), "")
         equal(layout.relative_scene(""), "")
 
-    @suite.case("copy_file refreshes the toolkit but not the scenes")
+    @suite.case("copy_file skips identical files and can be forced to refresh")
     def _():
         source = _write(os.path.join(work, "refresh", "src.py"), "one")
         target = os.path.join(work, "refresh", "copy.py")
@@ -189,8 +184,6 @@ def build_suite() -> Suite:
         ok(project_mod.copy_file(source, target), "a changed file is copied again")
         with open(target, encoding="utf-8") as handle:
             equal(handle.read(), "two")
-        # Toolkit copies are always refreshed, so the shipped renderer can never be
-        # older than the add-on that wrote the project.
         ok(not project_mod.copy_file(source, target), "nothing changed, nothing to do")
         ok(project_mod.copy_file(source, target, refresh=True), "refresh always rewrites")
         raises(project_mod.ProjectError,
@@ -206,59 +199,33 @@ def build_suite() -> Suite:
 
         with open(readme, encoding="utf-8") as handle:
             text = handle.read()
-        for needle in ("sequence/", "scene/", "video/", "render_sequences.py",
-                       "pack_textures.py", "--input-root", "--output-root",
-                       "--path-map", "scene/room001.blend", "5.2.2 LTS", "render_project.bat"):
+        for needle in ("sequence/", "scene/", "video/", "render-all.sh",
+                       project_mod.IMAGE_RENDERER, "--path-map", "--shards",
+                       "pack_textures.py", "scene/room001.blend", "5.2.2 LTS",
+                       "data only"):
             ok(needle in text, f"the README must mention {needle!r}")
+        ok("render_project.bat" not in text, "the launchers are gone from the slim folder")
 
         payload = json_io.load_json_file(manifest)
         equal(payload["generated"], 7, "metadata must survive into project.json")
         equal(payload["blender_version"], "5.2.2 LTS")
         equal(payload["schema_version"], 1)
+        equal(payload["layout"], "slim")
         equal(payload["sequence_root"], project_mod.to_forward_slashes(layout.sequence_root))
-        equal(payload["toolkit_missing"], [])
         equal(payload["scenes"][0]["relative"], "scene/room001.blend")
-        equal(sorted(payload["toolkit_scripts"]), ["pack_textures.py", "render_sequences.py"])
-        ok("--input-root" in payload["render_command"], payload["render_command"])
+        ok("render-all.sh" in payload["render_command"], payload["render_command"])
+        ok(project_mod.IMAGE_RENDERER in payload["renderer_command"],
+           payload["renderer_command"])
+        for gone in ("render_script", "package_dir", "package_files", "toolkit_scripts",
+                     "toolkit_missing"):
+            ok(gone not in payload, f"{gone!r} must be gone from project.json")
 
-    @suite.case("the launchers point at this folder and forward extra arguments")
+    @suite.case("scripts beside the package still find it (bootstrap walk-up)")
     def _():
-        layout = project_mod.ProjectLayout.create(os.path.join(work, "launch"),
-                                                 package_root=PACKAGE_ROOT)
-        layout.write_launchers()
-        bat = os.path.join(layout.root, "render_project.bat")
-        sh = os.path.join(layout.root, "render_project.sh")
-        ok(os.path.isfile(bat) and os.path.isfile(sh), (bat, sh))
-        with open(bat, encoding="utf-8") as handle:
-            bat_text = handle.read()
-        with open(sh, encoding="utf-8") as handle:
-            sh_text = handle.read()
-        for text in (bat_text, sh_text):
-            ok("--background" in text, text[:200])
-            ok("--factory-startup" in text, text[:200])
-            ok("sequence" in text and "video" in text, text[:200])
-            ok("BLENDER" in text, "the launcher must let the render node name its Blender")
-        ok("%*" in bat_text, "the Windows launcher must forward extra arguments")
-        ok('"$@"' in sh_text, "the POSIX launcher must forward extra arguments")
-
-    @suite.case("scripts copied to the project root still find the package")
-    def _():
-        # This is what makes the folder portable: ``render_sequences.py`` sits at the
-        # project root and the package in a *subfolder*, which the walk-up search in
-        # _bootstrap used to miss.
+        # Kept because farm-side copies of the renderer are still a supported shape:
+        # ``render_sequences.py`` next to a package *subfolder*.
         from blender_motion_pipeline import _bootstrap
 
-        layout = project_mod.ProjectLayout.create(os.path.join(work, "bootstrap"),
-                                                 package_root=PACKAGE_ROOT)
-        script = os.path.join(layout.root, "render_sequences.py")
-        nested = os.path.join(layout.root, os.path.basename(PACKAGE_ROOT), "_bootstrap.py")
-        equal(_bootstrap.locate(script), nested)
-
-        # ... and the shapes that already worked must keep working.
-        equal(_bootstrap.locate(os.path.join(PACKAGE_ROOT, "render", "x.py")),
-              os.path.join(PACKAGE_ROOT, "_bootstrap.py"))
-        equal(_bootstrap.locate(os.path.join(PACKAGE_ROOT, "tests", "x.py")),
-              os.path.join(PACKAGE_ROOT, "_bootstrap.py"))
         beside = os.path.join(work, "beside", "script.py")
         os.makedirs(os.path.dirname(beside), exist_ok=True)
         _write(beside, "# a farm-side copy\n")
@@ -270,6 +237,12 @@ def build_suite() -> Suite:
         equal(_bootstrap.locate(beside),
               os.path.join(os.path.dirname(beside), os.path.basename(PACKAGE_ROOT),
                            "_bootstrap.py"))
+
+        # ... and the shapes that already worked must keep working.
+        equal(_bootstrap.locate(os.path.join(PACKAGE_ROOT, "render", "x.py")),
+              os.path.join(PACKAGE_ROOT, "_bootstrap.py"))
+        equal(_bootstrap.locate(os.path.join(PACKAGE_ROOT, "tests", "x.py")),
+              os.path.join(PACKAGE_ROOT, "_bootstrap.py"))
 
     @suite.case("a parent folder with __init__.py does not shadow the package")
     def _():
@@ -343,7 +316,7 @@ def build_suite() -> Suite:
         equal(plain.list, True)
         equal(plain.compress, False)
 
-    @suite.case("the shipped pack_textures helper scans a project's scene folder")
+    @suite.case("the pack_textures helper scans a project's scene folder")
     def _():
         from blender_motion_pipeline.render import pack_textures
 
@@ -363,10 +336,21 @@ def build_suite() -> Suite:
         equal(pack_textures.collect_scenes(os.path.join(layout.scene_root, "a.blend")),
               [os.path.join(layout.scene_root, "a.blend")])
         equal(pack_textures.collect_scenes(os.path.join(work, "missing")), [])
-        # The helper resolves the package from a project-root copy too.
+        # The helper is no longer shipped into the project, but the shapes it can be
+        # run from must keep resolving: inside the package, and beside a package copy.
         equal(pack_textures._find_bootstrap(
-            os.path.join(layout.root, "pack_textures.py")),
-            os.path.join(layout.root, os.path.basename(PACKAGE_ROOT), "_bootstrap.py"))
+            os.path.join(PACKAGE_ROOT, "render", "pack_textures.py")),
+            os.path.join(PACKAGE_ROOT, "_bootstrap.py"))
+        beside = os.path.join(work, "packtextures", "pack_textures.py")
+        _write(beside, "# farm-side copy\n")
+        import shutil
+
+        shutil.copytree(PACKAGE_ROOT, os.path.join(os.path.dirname(beside),
+                                                   os.path.basename(PACKAGE_ROOT)),
+                        ignore=shutil.ignore_patterns("__pycache__"), dirs_exist_ok=True)
+        equal(pack_textures._find_bootstrap(beside),
+              os.path.join(os.path.dirname(beside), os.path.basename(PACKAGE_ROOT),
+                           "_bootstrap.py"))
 
     return suite
 

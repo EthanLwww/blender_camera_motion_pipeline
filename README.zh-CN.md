@@ -124,21 +124,17 @@ blender -b -P /path/to/blender_camera_motion_pipeline/render/render_sequences.py
 
 ## 项目文件夹（输出结构）
 
-一次运行写出**一个项目文件夹**：序列树 + 序列回放所需的场景 + 渲染器本体，可以整体打包丢到渲染节点。
+一次运行写出**一个项目文件夹**：**只有数据，没有代码**——序列树 + 序列回放所需的场景副本。渲染器在渲染镜像里（`/opt/mpp/blender_camera_motion_pipeline`），`render-all.sh` 会优先用项目里的、找不到就用镜像自带的，所以项目里再放一份只会白白多出 ~2 MB 并产生两个版本。
 
 ```text
 D:\projects\                         <- 你在面板里选的文件夹（Project folder）
 └── blender_camera_20260213\         <- 运行时创建（同一天重跑复用）
-    ├── project.json                 这个项目是什么 + 确切的渲染命令
-    ├── RENDER_README.md             给渲染节点看的同样命令
-    ├── render_project.bat / .sh     便捷启动脚本（Blender 不在 PATH 时设 BLENDER）
-    ├── render_sequences.py          无头渲染器（根目录一份）
-    ├── pack_textures.py             可选：把外部文件打包进场景副本
-    ├── blender_camera_motion_pipeline\   渲染器要 import 的插件包（无需安装）
-    ├── scene\                       每个源 .blend 的副本
+    ├── project.json                 这个项目是什么 + 渲染命令 + 场景映射
+    ├── RENDER_README.md             给渲染节点看的同样的命令
+    ├── scene\                       每个源 .blend 的副本（原样复制，贴图不压缩）
     │   └── room001.blend
-    ├── video\                       渲染输出（--output-root）
-    └── sequence\                    序列树（--input-root）
+    ├── video\                       渲染输出
+    └── sequence\                    序列树（渲染输入）
         ├── batch_config.json        本次运行的有效配置
         ├── batch_report.json        每场景/每序列结果
         ├── manifest.json            全部序列 + 全部失败的汇总
@@ -148,6 +144,21 @@ D:\projects\                         <- 你在面板里选的文件夹（Project
             ├── sequence_000001_camera.txt 逐帧相机轨迹
             ├── validation_report.json     逐帧指标 + 搜索日志
             └── generation_log.txt         该序列的逐步日志
+```
+
+渲染这个文件夹（镜像内）：
+
+```bash
+render-all.sh <项目>/sequence            # 视频默认写到 <项目>/video
+render-all.sh <项目>/sequence <输出目录>  # 也可以指定输出到别处（建议放挂载盘）
+```
+
+不用镜像、只用 Blender + 插件包时：
+
+```bash
+blender -b -noaudio --factory-startup \
+  -P /opt/mpp/blender_camera_motion_pipeline/render/render_sequences.py -- \
+  --input-root <项目>/sequence --output-root <项目>/video --recursive
 ```
 
 CLI 的 `--sequence-root <dir>` 会把 `sequence/` 的内容直接写进 `<dir>`（不要项目外层），供需要精确路径的脚本使用。序列编号在每个 motion 文件夹内从 `sequence_000001` 重新开始，因此单个 motion 文件夹自洽，重跑某个 motion 不会影响另一个的编号。
@@ -231,16 +242,23 @@ blender -b -P motion_pipeline_cli.py -- --print-config
 
 ## 无头渲染
 
-渲染一个生成好的项目不需要别的东西，项目文件夹自己就能渲染：
+项目文件夹只有数据，渲染器来自渲染镜像（`docker_blender/`）。镜像里一条命令就够：
 
 ```bash
-blender -b -P "<project>\render_sequences.py" -- \
-    --input-root "<project>\sequence" \
-    --output-root "<project>\video" \
-    --recursive
+render-all.sh <项目>/sequence             # 视频写到 <项目>/video
+render-all.sh <项目>/sequence <输出目录>   # 输出到别处（建议挂载盘）
 ```
 
-渲染节点上直接跑 `render_project.sh` / `render_project.bat`（Blender 不在 `PATH` 时设 `BLENDER`），项目里的 `RENDER_README.md` 也写了同样的命令。这个渲染器与本包的 `render/render_sequences.py` 是同一个文件，两者都能相对自身找到插件包。
+它读 `<项目>/sequence/**/sequence_config.json`，默认用每条序列记录的设置（引擎/分辨率/fps/帧范围），并打印预检、清单、日志和汇总。退出码：`0` 全部成功、`1` 有失败、`2` 预检/用法问题、`3` 没有可渲染的序列。
+
+没有镜像时，用本包的渲染器（同一个文件）：
+
+```bash
+blender -b -noaudio --factory-startup -P render/render_sequences.py -- \
+    --input-root "<project>/sequence" \
+    --output-root "<project>/video" \
+    --recursive
+```
 
 ```bash
 # 渲染 Blender 已打开的文件
@@ -277,18 +295,17 @@ blender -b -P render/render_sequences.py -- \
 ```bash
 # 传过去
 scp -r blender_camera_20260213 user@node:/data/proj/
-# 在那边渲染
+# 在那边渲染（镜像内；输出目录要落在挂载盘上）
 ssh node
-cd /data/proj/blender_camera_20260213
-BLENDER=/opt/blender-5.2.2-linux-x64/blender bash render_project.sh
+render-all.sh /data/proj/blender_camera_20260213/sequence /data/out/video
 ```
 
-为什么不需要任何参数：渲染器**就在**文件夹里，它 import 旁边的插件包；每条序列通过 `source_scene_rel`（`scene/<名字>.blend`）找到自己的场景，而 `project.json` 标出了项目根在哪。记录下来的 `source_blend` 是生成机器的绝对路径（`E:/…`），在节点上不可能存在——真正把镜头带过去的是那个相对路径。如果文件夹被重新组织过，用 `--project-root <dir>` 指明位置；此时 `--path-map` 只需要用于这些 `.blend` **内部**的资产。
+为什么不需要任何参数：每条序列通过 `source_scene_rel`（`scene/<名字>.blend`）找到自己的场景，而 `project.json` 标出了项目根在哪。记录下来的 `source_blend` 是生成机器的绝对路径（`E:/…`），在节点上不可能存在——真正把镜头带过去的是那个相对路径。如果文件夹被重新组织过，用 `--project-root <dir>` 指明位置；此时 `--path-map` 只需要用于这些 `.blend` **内部**的资产。
 
 `--list` 会逐条打印它将打开哪个场景文件，找不到时标记为 `scene missing`——在新节点上这是最合适的第一条命令：
 
 ```bash
-blender -b -P render_sequences.py -- --input-root sequence --output-root video --list
+blender -b -P render/render_sequences.py -- --input-root sequence --output-root video --list
 ```
 
 ### 让项目文件夹不依赖生成机器
@@ -297,12 +314,11 @@ blender -b -P render_sequences.py -- --input-root sequence --output-root video -
 
 ```bash
 # A. 在渲染节点上映射路径（可重复；对场景和资产都生效）
-blender -b -P "<project>/render_sequences.py" -- \
-    --input-root "<project>/sequence" --output-root "<project>/video" \
-    --recursive --path-map "E:/UE/DataGenScenes=/mnt/data/DataGenScenes"
+render-all.sh "<project>/sequence" --path-map "E:/UE/DataGenScenes=/mnt/data/DataGenScenes"
 
 # B. 一次性把外部文件打包进副本，之后整个文件夹自带全部依赖
-blender -b -P "<project>/pack_textures.py" -- --scene-root "<project>/scene"
+blender -b -P /opt/mpp/blender_camera_motion_pipeline/render/pack_textures.py -- \
+    --scene-root "<project>/scene"
 ```
 
 `pack_textures.py` 会打开每份场景副本、打包其外部文件、压缩存回原处，并在 `scene/` 旁写 `pack_report.json`，列出打包了什么、哪些找不到（找不到只报告，不会中断）。常用参数：`--scene <file>`、`--dry-run`、`--list`、`--no-compress`、`--report <path>`。
@@ -584,7 +600,7 @@ python blender_camera_motion_pipeline/tests/probe_template_contract.py -- \
 
 `tests/static_check.py` 另外检查全包无未使用 import、无遗留调试标记；其中一个集成用例用桩 layout 驱动**每个面板的 `draw()`**，避免"面板读了已不存在的属性、直到用户打开侧栏才崩"。
 
-端到端验收：**10/10 阶段**通过——构建 3 个夹具场景 → CLI 预演 → 用真实 80 模板文档生成 20 条序列 → 项目文件夹自包含性检查（场景副本 + 渲染工具链）→ 产物布局检查 → **用项目自带的渲染器副本渲染出 20 个视频到 `<project>/video`** → 每条视频都有配套 JSON + 轨迹 TXT → `ffprobe` 确认 H.264 与 81 帧 → 重跑渲染器跳过已完成序列并退出 0 → `--list` 枚举状态。日志见 `E2E_ACCEPTANCE_20260919.txt`。
+端到端验收：**10/10 阶段**通过——构建 3 个夹具场景 → CLI 预演 → 用真实 80 模板文档生成 20 条序列 → 项目文件夹检查（只有 `sequence/` + `scene/` + `video/`，数据齐全且自描述）→ 产物布局检查 → **用插件包（生产环境是镜像内）的渲染器渲染出 20 个视频到 `<project>/video`** → 每条视频都有配套 JSON + 轨迹 TXT → `ffprobe` 确认 H.264 与 81 帧 → 重跑渲染器跳过已完成序列并退出 0 → `--list` 枚举状态。日志见 `E2E_ACCEPTANCE_20260919.txt`。
 
 ---
 
@@ -603,7 +619,7 @@ blender_camera_motion_pipeline/
 │   ├── scene_loader.py / blender_context.py
 │   ├── sequence_generator.py   单条序列：校验 → 搜索 → 烘焙 → 写盘
 │   ├── batch_runner.py         场景 × 运动 × 相机 × 角色
-│   ├── project.py              一次运行写出的自包含项目文件夹
+│   ├── project.py              一次运行写出的精简（纯数据）项目文件夹
 │   ├── camera_animation.py     动画负载与回放
 │   ├── sequence_manager.py     输出树的只读视图
 │   └── ui_task.py              可取消的增量 timer 状态机
@@ -635,7 +651,7 @@ blender_camera_motion_pipeline/
 
 1. **本工作区没有真实角色资产。** 适配器完整并对 fake 测试过，`null`/`unreal_metahuman` 路径也被真实走过，但没有 MetaHuman 或 Blender rig 可用，因此角色序列未从真实资产产出过。
 2. **几何测试基于射线与 AABB。** 单面薄片正面命中可靠、擦边可能漏；极密网格会让搜索变慢。避让沿 26 个方向采样，不做解析求值。
-3. **场景是复制的，不是引用的。** 运行会把每个排队 `.blend` 复制进项目的 `scene/` 并从副本生成，因此项目自包含，代价是每个项目一份场景大小的磁盘（同一天重跑复用副本）。副本内部的贴图在跑 `pack_textures.py` 或用 `--path-map` 之前仍指向生成机器。
+3. **场景是复制的，不是引用的。** 运行会把每个排队 `.blend` 复制进项目的 `scene/` 并从副本生成，代价是每个项目一份场景大小的磁盘（同一天重跑复用副本）。副本是**逐字节复制**：贴图不会被降采样或重新打包。副本内部的贴图在跑 `pack_textures.py` 或用 `--path-map` 之前仍指向生成机器。
 4. **分辨率是渲染期决定。** 生成不改变场景尺寸，只把分辨率/fps/engine 记进 `sequence_config.json`，由渲染器应用；帧率写进序列文件（`scene.render.fps`），因为模板帧号是绝对的。
 5. **焦距是唯一的镜头控制。** Blender 无法表达"以单位表示焦距"，所有焦距处理都是毫米；模板焦距低于 1 mm 会被截断，请求值仍保留在元数据里。
 6. **轨迹符号约定。** TXT 与参考实现的 `R^T` 约定一致，因此相机**前方**的点 `z` 为正；每个文件头都写明，并有测试锁定。

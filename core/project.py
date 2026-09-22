@@ -1,20 +1,26 @@
-"""Self-contained project folder for headless rendering.
+"""Slim project folder for headless rendering.
 
 A run does not write a bare sequence tree any more: it writes one **project
-folder** that can be zipped up and unpacked on a render node, because a render
-node needs three things that used to live in three different places::
+folder** -- data only, no code -- that can be zipped up, unpacked on a render node
+or uploaded to a render service::
 
     <project folder the user picked>/
       blender_camera_20260213/          <- created by this module
         project.json                    what this project is, and how to render it
         RENDER_README.md                the exact commands
-        render_project.bat / .sh        convenience launchers
-        render_sequences.py             the headless renderer (root copy)
-        pack_textures.py                optional: make the scene copies portable
-        blender_camera_motion_pipeline/ the package the renderer imports
         sequence/                       the sequence tree  (--input-root)
         scene/                          the .blend copies  (sequence.source_blend)
         video/                          render output      (--output-root)
+
+What is deliberately **not** in the folder any more: the renderer, the package and
+the launchers.  The render image ships all of them (``IMAGE_PACKAGE``, built from
+``docker_blender/``), and ``render-all.sh`` inside that image looks for the
+renderer in the project first and falls back to its own copy, so shipping a second
+copy only added ~2 MB per project and two places to keep in sync.
+
+The scene copies stay byte-for-byte what generation validated: textures are never
+downscaled, re-encoded or repacked on the way out (the only way to ship a lighter
+scene is to lighten the source scene itself).
 
 Why the scene copies: an animation-only sequence records where its camera
 animation has to be replayed, and pointing that at ``E:\\UE\\...`` is useless on
@@ -45,24 +51,19 @@ SEQUENCE_DIRNAME = "sequence"
 SCENE_DIRNAME = "scene"
 VIDEO_DIRNAME = "video"
 
-#: Files copied into the project root so the folder renders on its own.
+#: Name of the headless renderer.  It is *not* copied into the project: the render
+#: image ships it, and ``render-all.sh`` falls back to the image copy.
 RENDER_SCRIPT = "render_sequences.py"
-TOOLKIT_SCRIPTS = (RENDER_SCRIPT, "pack_textures.py")
 
-#: Copied verbatim (the package the renderer imports).  Version-control metadata
-#: and caches are never shipped: the package itself is a git checkout here, and a
-#: project folder must not carry a .git directory (nor fail on a locked one).
-PACKAGE_COPY_SKIP = ("__pycache__", ".git", ".hg", ".svn", ".bzr", ".mypy_cache",
-                     ".pytest_cache", ".idea", ".vscode", ".uv-cache")
-PACKAGE_COPY_SUFFIXES = (".pyc", ".pyo")
+#: Where the render image keeps the package and the entry points.  The project's
+#: ``RENDER_README.md`` and ``project.json`` quote these paths so the commands can
+#: be pasted straight into a container.
+IMAGE_PACKAGE = "/opt/mpp/blender_camera_motion_pipeline"
+IMAGE_RENDERER = IMAGE_PACKAGE + "/render/" + RENDER_SCRIPT
+IMAGE_RENDER_ALL = "/usr/local/bin/render-all.sh"
 
 PROJECT_JSON = "project.json"
 README_NAME = "RENDER_README.md"
-LAUNCHER_BAT = "render_project.bat"
-LAUNCHER_SH = "render_project.sh"
-
-#: Written when Blender is not on ``PATH`` on the render node.
-LAUNCHER_ENV_HINT = "BLENDER"
 
 
 class ProjectError(RuntimeError):
@@ -82,27 +83,6 @@ def blender_version() -> str:
     except Exception:
         return ""
     return str(getattr(bpy.app, "version_string", "") or "")
-
-
-def _package_root(path: str) -> str:
-    """The add-on package folder that contains *path* (or "").
-
-    Identified by ``__init__.py`` **and** ``_bootstrap.py``, walking up: a bare
-    ``__init__.py`` is not enough, because ``core/`` is itself a subpackage and the
-    workspace this project lives in has its own ``__init__.py`` files.  Getting this
-    wrong ships the wrong tree into the project folder.
-    """
-    current = os.path.dirname(os.path.abspath(path))
-    for _ in range(8):
-        if os.path.isfile(os.path.join(current, "__init__.py")) and os.path.isfile(
-            os.path.join(current, "_bootstrap.py")
-        ):
-            return current
-        parent = os.path.dirname(current)
-        if parent == current:
-            break
-        current = parent
-    return ""
 
 
 def _same_file(source: str, target: str) -> bool:
@@ -126,9 +106,8 @@ def copy_file(source: str, target: str, *, refresh: bool = False) -> bool:
     """Copy *source* to *target*; returns True when it was written.
 
     ``refresh=False`` (scene copies) keeps an existing copy that matches the
-    source, so re-running does not re-copy gigabytes.  ``refresh=True`` (toolkit
-    copies) always rewrites, so the renderer shipped in the project always matches
-    the add-on version that generated it.
+    source, so re-running does not re-copy gigabytes.  ``refresh=True`` always
+    rewrites, for callers that must not keep a stale file around.
     """
     source = normalize_path(source)
     target = normalize_path(target)
@@ -141,111 +120,29 @@ def copy_file(source: str, target: str, *, refresh: bool = False) -> bool:
     return True
 
 
-def copy_package(source_root: str, target_root: str) -> int:
-    """Copy the add-on package so a render node does not need it installed."""
-    source_root = normalize_path(source_root)
-    if not source_root or not os.path.isdir(source_root):
-        return 0
-    if os.path.normcase(source_root) == os.path.normcase(normalize_path(target_root)):
-        return 0
-    count = 0
-    for current, dirnames, filenames in os.walk(source_root):
-        dirnames[:] = [
-            name for name in dirnames
-            if name not in PACKAGE_COPY_SKIP and not name.startswith(".")
-        ]
-        suffix = os.path.relpath(current, source_root)
-        destination = target_root if suffix == os.path else os.path.join(target_root, suffix)
-        ensure_dir(destination)
-        for filename in filenames:
-            if filename.endswith(PACKAGE_COPY_SUFFIXES):
-                continue
-            shutil.copy2(os.path.join(current, filename), os.path.join(destination, filename))
-            count += 1
-    return count
+def renderall_command(root: str, *, render_all: str = IMAGE_RENDER_ALL) -> str:
+    """The one-liner that renders every sequence, inside the render image.
 
-
-def copy_toolkit(package_root: str, root: str, *, logger=None) -> dict:
-    """Ship the renderer, the package and the launchers inside *root*."""
-    package_root = normalize_path(package_root)
-    result = {"scripts": [], "package_files": 0, "package_dir": "", "missing": []}
-    if not package_root:
-        result["missing"].append("package folder could not be located")
-        return result
-
-    for name in TOOLKIT_SCRIPTS:
-        source = ""
-        for candidate in (
-            os.path.join(package_root, "render", name),
-            os.path.join(package_root, name),
-        ):
-            if os.path.isfile(candidate):
-                source = candidate
-                break
-        if not source:
-            result["missing"].append(name)
-            continue
-        try:
-            if copy_file(source, os.path.join(root, name), refresh=True):
-                result["scripts"].append(name)
-        except OSError as exc:
-            result["missing"].append(f"{name}: {exc}")
-
-    target_package = os.path.join(root, os.path.basename(package_root))
-    try:
-        result["package_files"] = copy_package(package_root, target_package)
-        result["package_dir"] = target_package
-    except OSError as exc:
-        result["missing"].append(f"package copy: {exc}")
-
-    if logger is not None:
-        if result["missing"]:
-            logger.warning("project toolkit incomplete: %s", ", ".join(result["missing"]))
-        else:
-            logger.info(
-                "project toolkit: %d script(s) + %d package file(s) copied into %s",
-                len(result["scripts"]), result["package_files"], root,
-            )
-    return result
-
-
-def render_command(root: str, *, blender: str = "blender") -> str:
-    """The one-liner that renders every sequence in a project folder."""
+    ``render-all.sh <sequence-root> [video-root]`` reads every
+    ``sequence_config.json`` below the sequence root and writes the videos to the
+    project's ``video/`` folder unless a second path is given.
+    """
     root = normalize_path(root)
+    return f'{render_all} "{os.path.join(root, SEQUENCE_DIRNAME)}" "{os.path.join(root, VIDEO_DIRNAME)}"'
+
+
+def renderer_command(root: str, *, blender: str = "blender", renderer: str = "") -> str:
+    """The same render, spelled out for a machine that has Blender but no image.
+
+    *renderer* defaults to the copy inside the render image; pass the path of
+    ``render_sequences.py`` on that machine to use its own.
+    """
+    root = normalize_path(root)
+    renderer = renderer or IMAGE_RENDERER
     return (
-        f'"{blender}" --background --factory-startup '
-        f'--python "{os.path.join(root, RENDER_SCRIPT)}" -- '
+        f'"{blender}" -b -noaudio --factory-startup -P "{renderer}" -- '
         f'--input-root "{os.path.join(root, SEQUENCE_DIRNAME)}" '
         f'--output-root "{os.path.join(root, VIDEO_DIRNAME)}" --recursive'
-    )
-
-
-def launcher_text(root: str, *, windows: bool) -> str:
-    """Content of the convenience launcher shipped in the project folder."""
-    root = normalize_path(root)
-    if windows:
-        return (
-            "@echo off\r\n"
-            "REM Render every sequence in this project folder (Windows).\r\n"
-            "REM Set BLENDER to a blender.exe when it is not on PATH, e.g.\r\n"
-            "REM   set BLENDER=C:\\Program Files\\Blender Foundation\\Blender 5.2\\blender.exe\r\n"
-            "setlocal\r\n"
-            f'if "%{LAUNCHER_ENV_HINT}%"=="" set {LAUNCHER_ENV_HINT}=blender\r\n'
-            f'"%{LAUNCHER_ENV_HINT}%" --background --factory-startup '
-            f'"%~dp0{RENDER_SCRIPT}" -- '
-            f'"%~dp0{SEQUENCE_DIRNAME}" --output-root "%~dp0{VIDEO_DIRNAME}" --recursive %*\r\n'
-            "endlocal\r\n"
-            "exit /b %ERRORLEVEL%\r\n"
-        )
-    return (
-        "#!/bin/sh\n"
-        "# Render every sequence in this project folder (Linux / macOS).\n"
-        f"# Set {LAUNCHER_ENV_HINT} to a blender binary when it is not on PATH.\n"
-        'HERE=$(cd "$(dirname "$0")" && pwd)\n'
-        f': "${{{LAUNCHER_ENV_HINT}:=blender}}"\n'
-        f'"${LAUNCHER_ENV_HINT}" --background --factory-startup "$HERE/{RENDER_SCRIPT}" -- \\\n'
-        f'    --input-root "$HERE/{SEQUENCE_DIRNAME}" --output-root "$HERE/{VIDEO_DIRNAME}" '
-        '--recursive "$@"\n'
     )
 
 
@@ -254,16 +151,13 @@ def readme_text(
     *,
     created_utc: str = "",
     scenes: "list[str]" = (),
-    toolkit: "dict | None" = None,
     blender_version: str = "",
 ) -> str:
     """The ``RENDER_README.md`` shipped in the project folder."""
     root = normalize_path(root)
-    toolkit = toolkit or {}
-    package_name = os.path.basename(toolkit.get("package_dir") or "blender_camera_motion_pipeline")
 
     def row(name: str, note: str, *, indent: int = 2) -> str:
-        return " " * indent + name.ljust(34) + note
+        return " " * indent + name.ljust(26) + note
 
     lines = [
         "# Headless render project",
@@ -271,72 +165,73 @@ def readme_text(
         f"Created by the Blender camera-motion pipeline on {created_utc or 'unknown date'}.",
         f"Blender used for generation: {blender_version or 'unknown'}.",
         "",
+        "This folder is **data only** (the renderer lives in the render image):",
+        "",
         "```",
         to_forward_slashes(root) + "/",
-        row(RENDER_SCRIPT, "headless renderer (root copy)"),
-        row("pack_textures.py", "optional: pack external files into scene/"),
-        row(f"{LAUNCHER_BAT} / .sh", "convenience launchers"),
-        row(package_name + "/", "the package the renderer imports"),
-        row(SEQUENCE_DIRNAME + "/", "the sequence tree (--input-root)"),
-        row(SCENE_DIRNAME + "/", "the .blend each sequence is rendered from"),
-        row(VIDEO_DIRNAME + "/", "render output (--output-root)"),
+        row(SEQUENCE_DIRNAME + "/", "the sequence tree (input)"),
+        row(SCENE_DIRNAME + "/", "the .blend each sequence renders from"),
+        row(VIDEO_DIRNAME + "/", "render output"),
+        row(PROJECT_JSON, "what this project is, and the scene mapping"),
+        row(README_NAME, "this file"),
         "```",
         "",
         "## Render everything",
         "",
+        "Inside the render image (``docker_blender/``), where ``render-all.sh`` is on "
+        "``PATH`` -- it reads every ``sequence_config.json`` below the sequence root and "
+        "uses the settings each sequence recorded.  Run it from inside this folder "
+        "(the commands use relative paths so the folder stays portable):",
+        "",
         "```sh",
-        f'blender --background --factory-startup --python "{os.path.join(root, RENDER_SCRIPT)}" -- \\',
-        f'    --input-root "{os.path.join(root, SEQUENCE_DIRNAME)}" \\',
-        f'    --output-root "{os.path.join(root, VIDEO_DIRNAME)}" --recursive',
+        "render-all.sh ./" + SEQUENCE_DIRNAME + " ./" + VIDEO_DIRNAME,
         "```",
         "",
-        f"Or just run `{LAUNCHER_BAT}` (Windows) / `./{LAUNCHER_SH}` (Linux, macOS). Both set and use",
-        f"the `{LAUNCHER_ENV_HINT}` environment variable, falling back to `blender` on `PATH`.",
+        "The videos land in ``" + VIDEO_DIRNAME + "/<scene>/<motion>/<sequence_id>/``.",
+        "Pass a second path to write them somewhere else (do keep it on mounted storage, "
+        "anything written inside a container disappears with it).",
         "",
-        "Every sequence gets three files under "
-        f"`{VIDEO_DIRNAME}/<scene>/<motion>/<sequence_id>/`:",
+        "Anywhere else with Blender 5.2 and the package (or just the image's copy):",
+        "",
+        "```sh",
+        "blender -b -noaudio --factory-startup -P " + IMAGE_RENDERER + " -- \\",
+        "    --input-root ./" + SEQUENCE_DIRNAME + " --output-root ./" + VIDEO_DIRNAME
+        + " --recursive",
+        "```",
+        "",
+        "Every sequence produces:",
         "",
         "```",
         "<sequence_id>.mp4             the video",
         "<sequence_id>.json            render details (frames, resolution, engine, timings)",
         "<sequence_id>_camera.txt      per-frame world-to-camera camera trajectory",
+        "<sequence_id>_motion_plan.json   the compound plan it was generated from",
         "```",
         "",
-        "Useful additions: `--dry-run` (list what would render), `--list`, `--overwrite`,",
-        "`--frame-start/--frame-end`, `--resolution-x/--resolution-y`, `--engine`, `--samples`,",
-        "`--workers N`.",
+        "Useful additions: `--dry-run` (preflight + list), `--engine`, `--samples`, "
+        "`--device GPU`, `--shards N` (split the tree over N processes), `--force`, "
+        "`--retry-failed`.",
         "",
-        "## Scenes, textures and other external files",
+        "## Scenes",
         "",
-        f"The `.blend` copies in `{SCENE_DIRNAME}/` are the scenes the sequences were generated from",
-        "-- each `sequence_config.json` records its scene as `source_blend` (absolute) and",
-        "`source_scene_rel` (relative to this project folder). The renderer falls back to the",
-        "relative path automatically, so moving the whole folder to a render node needs no",
-        "arguments at all. Textures and other linked files inside those `.blend`s still point at",
-        "the machine that generated them; pick one of:",
+        f"The `.blend` copies in `{SCENE_DIRNAME}/` are the scenes the sequences were "
+        "generated from -- each `sequence_config.json` records its scene as `source_blend` "
+        "(absolute) and `source_scene_rel` (relative to this folder). The renderer falls "
+        "back to the relative path automatically, so moving the whole folder needs no "
+        "arguments at all. Textures are exactly as they were in the source scene: nothing "
+        "is downscaled or repacked here.",
         "",
-        "```sh",
-        "# A. bridge the paths at render time (repeatable, applied to scene paths and textures)",
-        f"blender -b -P {RENDER_SCRIPT} -- --input-root ./{SEQUENCE_DIRNAME} "
-        f"--output-root ./{VIDEO_DIRNAME} \\",
-        '    --recursive --path-map "E:/UE/DataGenScenes" "/mnt/data/DataGenScenes"',
-        "",
-        "# B. pack every external file into the scene copies once, then the folder is portable",
-        f"blender -b -P pack_textures.py -- --scene-root ./{SCENE_DIRNAME}",
-        "```",
-        "",
-        "Option B rewrites the copies in place (they get bigger, nothing else changes) and writes",
-        "`pack_report.json` listing what was packed and what could not be found.",
-        "",
-        "## Regenerating the sequences (optional)",
-        "",
-        "The package shipped here also contains the generator, so the project can be regenerated or",
-        "extended on another machine that has Blender:",
+        "If a scene uses files that only exist on the machine that generated it, bridge "
+        "them at render time or pack them once:",
         "",
         "```sh",
-        "blender -b -P blender_camera_motion_pipeline/motion_pipeline_cli.py -- \\",
-        f'    --config "{os.path.join(root, SEQUENCE_DIRNAME, "batch_config.json")}" \\',
-        '    --scenes "<path to a .blend>" --output-root "<a project folder>"',
+        "# A. remap the stored paths while rendering (repeatable)",
+        "render-all.sh ./" + SEQUENCE_DIRNAME + " --path-map \"E:/assets=/mnt/assets\"",
+        "",
+        "# B. pack every external file into the scene copies (copies get bigger, nothing",
+        "#    else changes; writes pack_report.json next to scene/)",
+        "blender -b -P " + IMAGE_PACKAGE + "/render/pack_textures.py -- --scene-root ./"
+        + SCENE_DIRNAME,
         "```",
         "",
     ]
@@ -344,15 +239,12 @@ def readme_text(
         lines += ["## Scenes in this project", ""]
         lines += [f"* `{to_forward_slashes(name)}`" for name in scenes]
         lines.append("")
-    missing = list(toolkit.get("missing") or [])
-    if missing:
-        lines += ["> Note: the toolkit copy was incomplete: " + ", ".join(missing), ""]
     return "\n".join(lines)
 
 
 @dataclass
 class ProjectLayout:
-    """Where a run writes its sequences, scenes, video and render toolkit."""
+    """Where a run writes its sequences, scenes and video (data only)."""
 
     project_root: str
     root: str
@@ -360,7 +252,6 @@ class ProjectLayout:
     scene_root: str = ""
     video_root: str = ""
     created_utc: str = ""
-    toolkit: dict = field(default_factory=dict)
     #: ``(original, copy)`` pairs, in the order they were staged.
     scene_copies: "list[tuple[str, str]]" = field(default_factory=list)
     notes: "list[str]" = field(default_factory=list)
@@ -403,9 +294,9 @@ class ProjectLayout:
                 raise ProjectError(f"cannot create {directory}: {exc}") from exc
 
         layout.created_utc = created_utc or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        layout.toolkit = copy_toolkit(package_root, layout.root, logger=logger)
         layout.load_manifest()
-        layout.write_launchers()
+        if logger is not None:
+            logger.info("project folder: %s (data only: sequence/, scene/, video/)", layout.root)
         return layout
 
     # -- previous runs ---------------------------------------------------
@@ -506,39 +397,40 @@ class ProjectLayout:
         return ""
 
     # -- reporting -------------------------------------------------------
-    def render_command(self, *, blender: str = "blender") -> str:
-        return render_command(self.root, blender=blender)
+    def render_command(self, *, render_all: str = IMAGE_RENDER_ALL) -> str:
+        """The command that renders this folder inside the render image."""
+        return renderall_command(self.root, render_all=render_all)
+
+    def renderer_command(self, *, blender: str = "blender", renderer: str = "") -> str:
+        """The same render without the image (needs Blender + the package)."""
+        return renderer_command(self.root, blender=blender, renderer=renderer)
 
     def describe(self, *, indent: str = "  ") -> str:
         """Multi-line folder summary (panel labels and logs)."""
         lines = [
-            f"{indent}{to_forward_slashes(self.root)}",
+            f"{indent}{to_forward_slashes(self.root)}   (data only -- no package copy)",
             f"{indent}{indent}{SEQUENCE_DIRNAME}/   sequences (metadata, trajectory, animation payload)",
             f"{indent}{indent}{SCENE_DIRNAME}/   .blend copies the sequences are rendered from",
             f"{indent}{indent}{VIDEO_DIRNAME}/   render output",
-            f"{indent}{indent}{RENDER_SCRIPT} + "
-            f"{os.path.basename(self.toolkit.get('package_dir') or 'the package')} (headless render toolkit)",
         ]
         return "\n".join(lines)
 
     def render_hint(self) -> str:
-        return f"Render the folder with {LAUNCHER_BAT}, or: {self.render_command()}"
+        return f"Render the folder with: {self.render_command()}"
 
     def to_dict(self) -> dict:
         return {
             "schema_version": 1,
+            "layout": "slim",
             "created_utc": self.created_utc,
             "project_root": to_forward_slashes(self.project_root),
             "root": to_forward_slashes(self.root),
             "sequence_root": to_forward_slashes(self.sequence_root),
             "scene_root": to_forward_slashes(self.scene_root),
             "video_root": to_forward_slashes(self.video_root),
-            "render_script": to_forward_slashes(os.path.join(self.root, RENDER_SCRIPT)),
             "render_command": self.render_command(),
-            "package_dir": to_forward_slashes(self.toolkit.get("package_dir") or ""),
-            "package_files": int(self.toolkit.get("package_files") or 0),
-            "toolkit_scripts": list(self.toolkit.get("scripts") or []),
-            "toolkit_missing": list(self.toolkit.get("missing") or []),
+            "renderer_command": self.renderer_command(),
+            "image_package": IMAGE_PACKAGE,
             "scenes": [
                 {
                     "original": to_forward_slashes(source),
@@ -551,24 +443,6 @@ class ProjectLayout:
         }
 
     # -- files -----------------------------------------------------------
-    def write_launchers(self) -> "list[str]":
-        written = []
-        for name, windows in ((LAUNCHER_BAT, True), (LAUNCHER_SH, False)):
-            path = os.path.join(self.root, name)
-            try:
-                with open(path, "w", encoding="utf-8", newline="") as handle:
-                    handle.write(launcher_text(self.root, windows=windows))
-            except OSError as exc:
-                self.toolkit.setdefault("missing", []).append(f"{name}: {exc}")
-                continue
-            if not windows:
-                try:
-                    os.chmod(path, 0o755)
-                except OSError:
-                    pass
-            written.append(path)
-        return written
-
     def write_manifest(self, *, metadata: "dict | None" = None, blender_version: str = "") -> str:
         """Write ``project.json`` -- what this folder is and how to render it."""
         payload = self.to_dict()
@@ -590,7 +464,6 @@ class ProjectLayout:
                     self.root,
                     created_utc=self.created_utc,
                     scenes=list(scenes),
-                    toolkit=self.toolkit,
                     blender_version=blender_version,
                 )
             )
@@ -605,9 +478,11 @@ def create_project(
     logger=None,
     blender_version: str = "",
 ) -> ProjectLayout:
-    """``ProjectLayout.create`` with the package folder auto-detected."""
-    if not package_root:
-        package_root = _package_root(__file__)
+    """``ProjectLayout.create`` for a data-only project folder.
+
+    *package_root* is accepted for backwards compatibility but unused: the slim
+    layout ships data only, and the renderer comes from the render image.
+    """
     return ProjectLayout.create(
         project_root,
         package_root=package_root,

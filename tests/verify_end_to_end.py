@@ -237,12 +237,15 @@ def step_check_project(project: str) -> None:
     for directory in ("sequence", "scene", "video"):
         if not os.path.isdir(os.path.join(project, directory)):
             problems.append(f"missing {directory}/")
-    for name in ("render_sequences.py", "project.json", "RENDER_README.md",
-                 "render_project.bat", "render_project.sh"):
+    for name in ("project.json", "RENDER_README.md"):
         if not os.path.isfile(os.path.join(project, name)):
             problems.append(f"missing {name}")
-    if not os.path.isdir(os.path.join(project, "blender_camera_motion_pipeline")):
-        problems.append("the package the renderer imports was not copied")
+    # Slim layout: the folder is data only, the renderer comes from the image.
+    for name in ("render_sequences.py", "pack_textures.py",
+                 "render_project.bat", "render_project.sh",
+                 "blender_camera_motion_pipeline"):
+        if os.path.exists(os.path.join(project, name)):
+            problems.append(f"{name} must not be shipped inside the project folder")
     copies = sorted(os.listdir(os.path.join(project, "scene"))) if os.path.isdir(
         os.path.join(project, "scene")) else []
     if len(copies) != 3:
@@ -266,7 +269,7 @@ def step_check_project(project: str) -> None:
         if not relative or not os.path.isfile(os.path.join(project, relative)):
             problems.append(f"{current}: source_scene_rel does not resolve inside the project: {relative}")
     record(
-        "4. the project folder is self-contained (scene copies + render toolkit)",
+        "4. the project folder is data only and self-describing (sequence/ + scene/ + video/)",
         not problems and checked >= 3 and len(copies) == 3,
         f"{checked} sequence(s), {len(copies)} scene copy/copies"
         + (f"; {problems[0]}" if problems else ""),

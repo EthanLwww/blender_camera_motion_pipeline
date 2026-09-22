@@ -424,7 +424,8 @@ class MPP_SceneProperties(PropertyGroup):
             "Folder the project is written into. Generation creates "
             "blender_camera_<date>/ inside it, holding sequence/ (the sequence tree), "
             "scene/ (a copy of every source .blend) and video/ (render output), plus "
-            "the headless render toolkit"
+            "project.json and a render README -- data only, the renderer comes from "
+            "the render image"
         ),
         default="",
         subtype="DIR_PATH",

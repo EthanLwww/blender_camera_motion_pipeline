@@ -499,8 +499,8 @@ def command_run(config: BatchConfig, entries, args) -> int:
         # created for a real run.
         return _dry_run_matrix(config, entries, runner, args)
 
-    # A run writes one project folder (sequence tree + scene copies + render
-    # toolkit) unless --sequence-root asked for a bare sequence tree.
+    # A run writes one slim project folder (sequence tree + scene copies, data only)
+    # unless --sequence-root asked for a bare sequence tree.
     if not getattr(args, "no_project_layout", False):
         from blender_motion_pipeline.core.project import ProjectError, create_project
 

@@ -93,9 +93,9 @@ class UITaskState:
         self.started_at = time.time()
         self.camera_selection = camera_selection or "all"
 
-        # One project folder per run: the sequence tree, a copy of every scene it
-        # was generated from and the headless render toolkit, so the folder can be
-        # zipped to a render node as it is.
+        # One project folder per run: the sequence tree plus a copy of every scene it
+        # was generated from.  Data only -- the renderer comes from the render image,
+        # so the folder can be zipped/uploaded as it is.
         self.project_layout = create_project(config.batch.output_root, logger=LOGGER)
         self.output_root = self.project_layout.sequence_root
         self.stage = "copying scenes into the project"

@@ -1102,12 +1102,15 @@ def build_suite() -> Suite:
 
         for directory in ("sequence", "scene", "video"):
             ok(os.path.isdir(os.path.join(layout.root, directory)), directory)
-        for name in ("render_sequences.py", "pack_textures.py", "project.json",
-                     "RENDER_README.md", "render_project.bat", "render_project.sh"):
+        # Slim layout: data only.  The renderer and the package live in the render
+        # image; shipping a second copy per project only added megabytes and drift.
+        for name in ("render_sequences.py", "pack_textures.py",
+                     "render_project.bat", "render_project.sh",
+                     os.path.basename(_PACKAGE_ROOT)):
+            ok(not os.path.exists(os.path.join(layout.root, name)),
+               "%s must not be inside the project folder" % name)
+        for name in ("project.json", "RENDER_README.md"):
             ok(os.path.isfile(os.path.join(layout.root, name)), name)
-        ok(os.path.isfile(os.path.join(layout.root, os.path.basename(_PACKAGE_ROOT),
-                                       "_bootstrap.py")),
-           "the package the renderer imports must be inside the project folder")
 
         copies = os.listdir(layout.scene_root)
         equal(len(copies), 1, copies)
@@ -1123,19 +1126,23 @@ def build_suite() -> Suite:
 
         manifest = load_json_file(os.path.join(layout.root, "project.json"))
         equal(manifest["sequence_root"], to_forward_slashes(layout.sequence_root))
-        ok("--input-root" in manifest["render_command"], manifest["render_command"])
+        equal(manifest["layout"], "slim")
+        ok("render-all.sh" in manifest["render_command"], manifest["render_command"])
         equal(manifest["scenes"][0]["relative"], "scene/" + copies[0])
         with open(os.path.join(layout.root, "RENDER_README.md"), encoding="utf-8") as handle:
             readme = handle.read()
-        ok("--input-root" in readme and "--output-root" in readme, readme[:400])
+        ok("render-all.sh" in readme, readme[:400])
         ok("scene/" + copies[0] in readme, "the README must list the scenes it ships")
 
-        # The point of all of it: the folder renders with its own copy of the
-        # renderer, importing the package beside it, with nothing installed.
+        # The point of all of it: the data-only folder renders with a renderer that
+        # lives outside it (here the package copy, in production the image), finding
+        # the scenes through source_scene_rel.
+        from blender_motion_pipeline.render.render_runner import render_script_path
+
         blender = bpy.app.binary_path or "blender"
         completed = subprocess.run(
             [blender, "-b", "--factory-startup",
-             "-P", os.path.join(layout.root, "render_sequences.py"), "--",
+             "-P", render_script_path(), "--",
              "--input-root", layout.sequence_root, "--output-root", layout.video_root,
              "--list", "--log-level", "ERROR"],
             capture_output=True, text=True, timeout=600,
@@ -2469,8 +2476,8 @@ def build_suite() -> Suite:
                "the project folder must hold the scene copy the renderer replays onto")
             ok(os.path.isfile(os.path.join(project, "project.json")),
                "the project folder must describe itself")
-            ok(os.path.isfile(os.path.join(project, "render_sequences.py")),
-               "the project folder must ship the headless renderer")
+            ok(not os.path.exists(os.path.join(project, "render_sequences.py")),
+               "the slim project folder must not ship code (the image has the renderer)")
             scene_copies = os.listdir(os.path.join(project, "scene"))
             equal(len(scene_copies), 1, scene_copies)
             ok(os.path.isfile(os.path.join(project, "sequence", "single", "still",

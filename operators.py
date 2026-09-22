@@ -615,7 +615,7 @@ class MPP_OT_check_configuration(_MPPBase, Operator):
         missing = sum(1 for entry in entries if not entry.exists)
         lines.append(f"scenes: {len(entries)} queued, {missing} missing")
         lines.append(f"project folder: {to_forward_slashes(group.project_folder()) or '(unset)'}")
-        lines.append("  sequence/ + scene/ + video/ + render toolkit are created in it")
+        lines.append("  sequence/ + scene/ + video/ are created in it (data only)")
         lines.append(
             f"validation: {'on' if config.validation.enabled else 'off'}, "
             f"step {config.validation.sample_step}, clearance {config.validation.clearance}"
