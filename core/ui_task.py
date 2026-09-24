@@ -65,6 +65,12 @@ class UITaskState:
         self.project_layout = None
         #: ``sequence/`` inside the project folder.
         self.output_root: str = ""
+        #: What packing embedded and what placing the focus models did, per scene.
+        self.asset_packs: "list[dict]" = []
+        self.focus_placements: "list[dict]" = []
+        #: ``{base scene copy: [(model, variant entry), ...]}`` -- one copy per subject.
+        self.focus_variants: "dict" = {}
+        self.focus_models_list: "list" = []
 
     # -- lifecycle -------------------------------------------------------
     def begin(
@@ -109,6 +115,7 @@ class UITaskState:
                 raise ProjectError(f"scene could not be copied into the project: {entry.path} ({exc})")
             entry.original_path = entry.path
             entry.path = copy
+            self._pack_and_place_focus(copy)
 
         library = MotionTemplateLibrary.from_config(config.motion, logger=LOGGER)
         self._apply_motion_filter(library, config.motion.template_names)
@@ -356,12 +363,14 @@ class UITaskState:
             self.queue_index = 0
             return
 
+        focus_variants = self._focus_variants(entry)
         requests = self.generator.build_requests(
             entry,
             library=self.library,
             cameras=selected,
             character_variants=self.variants,
             start_index=self.total_requests + 1,
+            focus_variants=focus_variants,
         )
         self.queue = requests
         self.queue_index = 0
@@ -369,14 +378,110 @@ class UITaskState:
         self.setup["request_count"] = self.total_requests
         self.controller.set_total(self.total_requests, stage=f"scene {scene_name_for(entry)}")
         LOGGER.info(
-            "expanded scene %s: %d camera(s) x %d template(s) x %d variant(s) = %d sequence(s)",
+            "expanded scene %s: %d camera(s) x %d template(s) x %d variant(s) x %d focus "
+            "object(s) = %d sequence(s)",
             scene_name_for(entry), len(selected), len(self.library),
-            len(self.variants), len(requests),
+            len(self.variants), len(focus_variants) or 1, len(requests),
         )
+        self._opened_scene = entry.path
+
+    def _pack_and_place_focus(self, copy: str) -> None:
+        """Embed the base copy's assets, then give every focus model its own copy.
+
+        Runs in throwaway Blender processes (``pack_textures.py`` and
+        ``place_focus_objects.py``): the artist's file is open in this session, so the
+        staged copies have to be finished out of process.  Problems are recorded as
+        warnings -- a scene with a missing asset or a model that will not load can still
+        be generated, it just renders with less in it.
+
+        One copy per model, each holding **exactly one** focus object: a shot has one
+        subject, and the file the render node opens then says which.
+        """
+        from . import focus as focus_objects
+        from .project import FOCUS_REPORT, PACK_REPORT, pack_scene, place_focus_models
+        from ..io.path_utils import parse_path_mappings
+        from .scene_loader import SceneEntry
+
+        layout = self.project_layout
+        try:
+            record = pack_scene(copy, logger=LOGGER,
+                                report=os.path.join(layout.root, PACK_REPORT))
+        except Exception as exc:  # noqa: BLE001 - reported, never fatal
+            record = {"missing": [], "error": str(exc)}
+        self.asset_packs.append(record)
+        for item in (record.get("missing") or [])[:5]:
+            LOGGER.warning("scene %s points at a file that no longer exists: %s",
+                           os.path.basename(copy), item.get("path") or item)
+
+        self.focus_models_list = focus_objects.models_from_section(
+            getattr(self.config, "focus", None),
+            mappings=parse_path_mappings(self.config.batch.path_mappings),
+            logger=LOGGER,
+        )
+        if not self.focus_models_list:
+            return
+        variants = []
+        for model in self.focus_models_list:
+            try:
+                variant_path = self.project_layout.stage_scene(copy, logger=LOGGER,
+                                                               label=model.id)
+            except Exception as exc:  # noqa: BLE001 - reported, never fatal
+                LOGGER.warning("the scene copy for focus object %r could not be staged: %s",
+                               model.id, exc)
+                continue
+            placed = place_focus_models(
+                variant_path, [model],
+                anchor=focus_objects.anchor_from_section(self.config.focus),
+                logger=LOGGER,
+                report=os.path.join(layout.root, FOCUS_REPORT),
+            )
+            self.focus_placements.append(placed)
+            if not placed.get("ok"):
+                LOGGER.warning("focus object %r could not be placed in %s: %s", model.id,
+                               os.path.basename(variant_path),
+                               placed.get("error") or "unknown reason")
+                continue
+            variant = SceneEntry(path=variant_path)
+            variant.original_path = copy
+            variants.append((model, variant))
+            LOGGER.info("focus object %r: %s", model.id, os.path.basename(variant_path))
+        self.focus_variants[copy] = variants
+
+    def _focus_variants(self, entry) -> list:
+        """The ``(model, scene copy)`` pairs staged for this scene."""
+        return list(self.focus_variants.get(entry.path, []))
 
     def _generate(self, request: SequenceRequest) -> None:
         self.stage = f"{request.motion_name} / {request.camera_name}"
         self.controller.set_stage(self.stage)
+        # Each focus object has its own scene copy, so the file has to be switched when
+        # the queue moves on to the next subject.  Opening a file wipes Blender's Python
+        # timer registry, which is why the panel tick re-registers itself after every
+        # step (see registration._generation_tick).
+        if (request.scene_entry.path
+                and os.path.normcase(request.scene_entry.path)
+                != os.path.normcase(self._opened_scene or "")):
+            switch = open_scene_for_generation(
+                request.scene_entry,
+                safe_copy=False,
+                scratch_dir=os.path.join(self.project_layout.root, "_scratch")
+                if self.project_layout else "",
+            )
+            if not switch.ok:
+                result = SequenceResult(request=request, ok=False,
+                                        error=f"cannot open the scene copy: {switch.error}")
+                self.failures.append({
+                    "sequence_id": request.sequence_folder,
+                    "scene_name": request.scene_name,
+                    "motion_name": request.motion_name,
+                    "camera_name": request.camera_name,
+                    "error": result.error,
+                })
+                self.failed += 1
+                return
+            self._opened_scene = request.scene_entry.path
+            LOGGER.info("focus object %r: generating from %s", request.focus,
+                        os.path.basename(request.scene_entry.path))
         try:
             result = self.generator.generate(request)
         except Exception as exc:

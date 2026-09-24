@@ -187,7 +187,7 @@ class MPP_PT_render(_MPPPanel, Panel):
 
     bl_idname = "MPP_PT_render"
     bl_label = "Local render"
-    bl_order = 5
+    bl_order = 7
 
     def draw(self, context):
         layout = self.layout
@@ -440,6 +440,44 @@ class MPP_PT_validation(_MPPPanel, Panel):
         column.prop(group, "search_max_output")
 
 
+class MPP_PT_region(_MPPPanel, Panel):
+    """The box the camera is allowed to travel in, and how a shot that leaves it is handled."""
+
+    bl_idname = "MPP_PT_region"
+    bl_label = "Camera region"
+    bl_order = 5
+
+    def draw(self, context):
+        layout = self.layout
+        group = context.scene.mpp
+
+        # A feasibility rule, not a clamp: a shot that would leave the box is re-drawn
+        # (segment, plan, slower atoms, split) and reported; nothing is bent to fit.
+        box = layout.box()
+        box.prop(group, "region_mode")
+        if group.region_mode != "off":
+            column = box.column(align=True)
+            if group.region_mode == "object":
+                column.prop(group, "region_object")
+                column.prop(group, "region_use_selected")
+            elif group.region_mode == "auto":
+                column.prop(group, "region_margin_percent")
+            else:
+                column.prop(group, "region_center")
+                column.prop(group, "region_size")
+                column.prop(group, "region_rotation")
+            row = column.row(align=True)
+            row.prop(group, "region_inset")
+            row.prop(group, "region_margin")
+            column.prop(group, "region_attempts")
+            column.prop(group, "region_strict")
+            icon = "INFO" if group.region_ok() else "ERROR"
+            for line in group.region_summary().splitlines():
+                box.label(text=line, icon=icon)
+        else:
+            layout.label(text="The camera may go anywhere (no box is applied)", icon="INFO")
+
+
 class MPP_PT_output(_MPPPanel, Panel):
     """The project folder a run writes, and how the sequences are written."""
 
@@ -460,6 +498,7 @@ class MPP_PT_output(_MPPPanel, Panel):
             box.label(text=line)
 
         row = layout.row(align=True)
+        row.prop(group, "keep_reports")
         row.prop(group, "save_validation_report")
         row.prop(group, "overwrite")
         row = layout.row(align=True)
@@ -495,6 +534,17 @@ class MPP_PT_output(_MPPPanel, Panel):
             for line in group.composite_summary().splitlines():
                 box.label(text=line, icon=icon)
 
+        # -- camera movement region --------------------------------------
+        # A feasibility rule, not a clamp: a shot that would leave the box is re-drawn
+        # (segment, plan, slower atoms, split) and reported; nothing is bent to fit.
+        # The controls live in the "Camera region" panel above; only the verdict is
+        # repeated here, next to the settings it is recorded beside.
+        if group.region_mode != "off":
+            box = layout.box()
+            box.label(text="Camera region", icon="INFO" if group.region_ok() else "ERROR")
+            for line in group.region_summary().splitlines():
+                box.label(text=line)
+
         box = layout.box()
         box.label(text="Render defaults (recorded for the renderer)", icon="RENDER_STILL")
         column = box.column(align=True)
@@ -520,7 +570,7 @@ class MPP_PT_actions(_MPPPanel, Panel):
 
     bl_idname = "MPP_PT_actions"
     bl_label = "Actions"
-    bl_order = 5
+    bl_order = 7
 
     def draw(self, context):
         layout = self.layout
@@ -560,7 +610,7 @@ class MPP_PT_status(_MPPPanel, Panel):
 
     bl_idname = "MPP_PT_status"
     bl_label = "Status"
-    bl_order = 6
+    bl_order = 8
 
     def draw(self, context):
         from .preferences import live_status
@@ -642,15 +692,120 @@ class MPP_UL_scene_list(bpy.types.UIList):
         return flags, order
 
 
+class MPP_UL_focus_list(bpy.types.UIList):
+    """Focus-model rows: enable toggle, model name, and what it will do."""
+
+    bl_idname = "MPP_UL_focus_list"
+
+    def draw_item(self, context, layout, data, item, icon, active_data,
+                  active_propname, index, flt_flag):
+        row = layout.row(align=True)
+        row.prop(item, "enabled", text="")
+        icon_name = "FILE_BLEND" if os.path.isfile(item.path or "") else "ERROR"
+        column = row.column()
+        column.label(text=item.label(), icon=icon_name)
+        if item.object_name:
+            column.label(text=f"object: {item.object_name}")
+        elif item.note:
+            column.label(text=item.note)
+        if abs(float(item.scale) - 1.0) > 1e-6:
+            row.label(text=f"x{float(item.scale):g}")
+
+
+class MPP_PT_focus(_MPPPanel, Panel):
+    """Focus objects: the subject an Arc orbits, and the anchor it stands on."""
+
+    bl_idname = "MPP_PT_focus"
+    bl_label = "Focus object"
+    bl_order = 6
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        layout = self.layout
+        group = context.scene.mpp
+
+        layout.prop(group, "focus_mode")
+
+        # -- models ------------------------------------------------------
+        box = layout.box()
+        box.label(text="Models (.blend)", icon="FILE_BLEND")
+        column = box.column(align=True)
+        column.prop(group, "focus_file", text="")
+        column.operator("mpp.focus_add_model", icon="ADD")
+        row = box.row(align=True)
+        row.prop(group, "focus_directory", text="")
+        row.operator("mpp.focus_add_directory", text="", icon="FILE_FOLDER")
+
+        header = layout.row(align=True)
+        header.label(text=f"Focus models ({len(group.focus_list)})", icon="ASSET_MANAGER")
+        if group.focus_list:
+            layout.template_list(
+                "MPP_UL_focus_list", "",
+                group, "focus_list",
+                group, "focus_list_index",
+                rows=4,
+            )
+            index = group.focus_list_index
+            if 0 <= index < len(group.focus_list):
+                item = group.focus_list[index]
+                details = layout.box()
+                details.prop(item, "name")
+                details.prop(item, "object_name")
+                row = details.row(align=True)
+                row.prop(item, "scale")
+                row.prop(item, "rotation")
+                details.label(text=os.path.basename(item.directory()) or "(no folder)",
+                              icon="FILE_FOLDER")
+            row = layout.row(align=True)
+            row.operator("mpp.focus_move_up", text="", icon="TRIA_UP")
+            row.operator("mpp.focus_move_down", text="", icon="TRIA_DOWN")
+            row.operator("mpp.focus_remove", text="", icon="REMOVE")
+            row.operator("mpp.focus_clear", text="", icon="TRASH")
+        else:
+            layout.label(text="No models yet - add the .blend files to instantiate",
+                         icon="INFO")
+
+        # -- anchor ------------------------------------------------------
+        box = layout.box()
+        box.label(text="Anchor point (one per scene)", icon="EMPTY_AXIS")
+        box.prop(group, "focus_anchor_mode")
+        if group.focus_anchor_mode == "object":
+            box.prop(group, "focus_anchor_object")
+            box.operator("mpp.focus_auto_anchor", icon="VIEWZOOM")
+        elif group.focus_anchor_mode == "numbers":
+            box.prop(group, "focus_anchor_location")
+        else:
+            box.prop(group, "focus_anchor_clearance")
+            box.operator("mpp.focus_auto_anchor", icon="VIEWZOOM")
+
+        # -- the arc -----------------------------------------------------
+        box = layout.box()
+        box.label(text="Arc shots", icon="DRIVER_ROTATIONAL_DIFFERENCE")
+        box.prop(group, "focus_keep_visible")
+        if group.focus_keep_visible:
+            box.prop(group, "focus_visible_ratio")
+            box.prop(group, "focus_strict")
+        if group.focus_mode == "off":
+            box.label(text="Focus objects are off: nothing is placed or generated",
+                      icon="INFO")
+        else:
+            enabled = sum(1 for item in group.focus_list if item.enabled and item.path)
+            box.label(text=f"{enabled} model(s) x camera x motion sequences",
+                      icon="CHECKMARK")
+
+
 CLASSES = (
     MPP_UL_scene_list,
     MPP_UL_render_list,
+    MPP_UL_focus_list,
     MPP_PT_quick,
     MPP_PT_scenes,
     MPP_PT_character,
     MPP_PT_motion,
     MPP_PT_validation,
     MPP_PT_output,
+    MPP_PT_region,
+    MPP_PT_focus,
     MPP_PT_render,
     MPP_PT_actions,
     MPP_PT_status,

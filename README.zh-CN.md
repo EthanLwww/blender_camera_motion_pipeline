@@ -19,13 +19,15 @@
 7. [配置参考](#配置参考)
 8. [运动模板](#运动模板)
 9. [复合运镜](#复合运镜compound-shots)
-10. [相机校验与自动搜索](#相机校验与自动搜索)
-10. [角色（Character）](#角色character)
-11. [渲染农场注意事项](#渲染农场注意事项)
-12. [测试](#测试)
-13. [架构](#架构)
-14. [版本兼容](#版本兼容)
-15. [已知限制](#已知限制)
+10. [相机可移动范围（区域盒子）](#相机可移动范围区域盒子)
+11. [焦点对象（Focus object）](#焦点对象focus-object)
+12. [相机校验与自动搜索](#相机校验与自动搜索)
+13. [角色（Character）](#角色character)
+14. [渲染农场注意事项](#渲染农场注意事项)
+15. [测试](#测试)
+16. [架构](#架构)
+17. [版本兼容](#版本兼容)
+18. [已知限制](#已知限制)
 
 ---
 
@@ -39,8 +41,9 @@
 | 相机自动搜索 | 校验失败时 | 球面候选 + 加权评分 |
 | 序列生成 | 面板 **或** CLI | 独立序列（只存相机动画，约 150 KB/条） |
 | 视频渲染 | `render/render_sequences.py` | 每序列 MP4 + JSON + 相机轨迹 TXT |
+| 焦点对象（可选） | 面板 **Focus object** | 模型摆到场景唯一的锚点上；`Arc` 改为绕它转，其它运动只把它拍进画面 |
 
-生成矩阵为 **场景 × 运动模板 × 相机 × 角色 × 角色动画**；关闭角色时该维度折叠为单个"无角色"项。
+生成矩阵为 **场景 × 运动模板 × 相机 × 角色 × 角色动画**；关闭角色时该维度折叠为单个"无角色"项。打开 `focus.mode = models` 后再乘上**焦点对象**：**场景 × 相机 × 运动 × 焦点对象**，序列编号在每个 motion 文件夹内跨对象连续，不建 per-object 子目录。
 
 ---
 
@@ -79,7 +82,7 @@ blender -b -P /path/to/blender_camera_motion_pipeline/render/render_sequences.py
 
 ## 插件使用
 
-面板顺序：**Quick actions**、Scenes、Character、Motion templates、Camera validation、Sequence output、Local render、Actions、Status。
+面板顺序：**Quick actions**、Scenes、Character、Motion templates、Camera validation、Sequence output、**Camera region**、**Focus object**、Local render、Actions、Status。
 
 ### Quick actions
 
@@ -114,6 +117,7 @@ blender -b -P /path/to/blender_camera_motion_pipeline/render/render_sequences.py
 * **Character**：`Character mode`（无角色 / 只出角色序列 / 两者都要）、`Assets`/`Animations` 指向角色库（见 [角色](#角色character)）；`Import status` 如实报告 provider 能力，不可用时明确说明，无角色流程照常运行。
 * **Motion templates**：模板 JSON 路径（**加载时预填**，永不为空：优先项目自己的模板文档，插件自带的副本只在没有模板集的机器上兜底），空时还有 **Use the default template set** 按钮；`Motion filter` 支持逗号分隔的 id 或 glob（如 `dolly_*, pan_left_*`）；`First frame`/`FPS`/`Interpolation` 控制时间轴。
 * **Camera validation**：`Validate cameras`、`Sample step`、`Minimum clearance`、`Blocked-shot distance`、`Max move/turn per frame`、角色可见性/穿模检查，以及 `Auto-adjust camera`（球面搜索的全部参数）。
+* **Focus object**（默认折叠）：`Focus objects` 开关（`No focus objects` / `One per model`）；模型列表（每行可勾选启用，展开可改 `Name`/`Object`/`Scale`/`Rotation`）配 `Add model`、模型文件夹扫描、上移/下移/删除/清空；锚点（`Auto (open spot)` / `From object` / `Numbers`，`Anchor clearance`，以及 **Auto place anchor** 按钮——它在场景最开阔处创建或移动名为 `MPP_FocusAnchor` 的 empty）；弧线选项 `Keep the subject in frame` / `Required visibility` / `Skip shots that lose the subject`。设置随整个 `BatchConfig` 走（见 [焦点对象](#焦点对象focus-object)）。
 * **Sequence output**：**Project folder**、`Save validation report`、`Overwrite existing`、`Reuse existing sequences`、`Cameras`（`all`／名字／索引），以及记录给渲染器的渲染默认值（engine、samples、fps、视频格式、轨迹采样、**Sequence resolution**）。这些都会写进每条序列的 `sequence_config.json`，之后无头渲染可原样复现。
 * **Sequence resolution** 是预设列表而非自由数字，标签直接写明像素：*720p (1280×720)*（默认）、*1080p (1920×1080)*、*1K square (1024×1024)*、*2K (2048×1080)*、*4K (3840×2160)*，另有 **Follow the source scene** 与 **Custom size**。渲染时的分辨率优先级（高到低）：**命令行/面板覆盖** → **序列自身的记录**（仅当序列指定了）→ **已加载场景**；渲染报告与每序列日志都会写明来源（`resolution_source: sequence | command line | scene`）。
 * **Local render**：不离开 Blender 渲染序列，且不碰你当前打开的文件——每条序列都由一个后台 Blender 进程跑同一个独立渲染器，与渲染农场走完全相同的代码路径。可设 `Sequence root`/`Sequence folder`、`Save to`（`Sequence root` 指向项目的 `sequence/` 时默认写进项目的 `video/`）、`Flat output`、`Quality`（engine 下拉、分辨率/FPS/samples 各自带勾选覆盖、Cycles device、容器与编码、质量预设、可选 PNG 序列）、`Check only`、`Render`/`All`/`Stop render`；`panel_render.log` 记录每条命令与结果。
@@ -163,6 +167,12 @@ blender -b -noaudio --factory-startup \
 
 CLI 的 `--sequence-root <dir>` 会把 `sequence/` 的内容直接写进 `<dir>`（不要项目外层），供需要精确路径的脚本使用。序列编号在每个 motion 文件夹内从 `sequence_000001` 重新开始，因此单个 motion 文件夹自洽，重跑某个 motion 不会影响另一个的编号。
 
+**生成时会把场景副本的外部文件打包进去。** 每份副本一写进 `scene/`，就用独立 Blender 进程跑一次 `render/pack_textures.py`：贴图、字体、视频等外部文件被嵌进那份 `.blend`，生成与后续渲染都用这份自包含副本。结果写在项目根的 `pack_report.json`（逐场景：打包了什么、哪些找不到、体积变化、用时），`project.json` 里另有 `asset_pack` 汇总，日志里每个场景一行 `scene assets: <名字> -- ... (N packed, M missing)`。
+
+打开焦点对象后，`scene/` 里除了基础副本还会有**每个焦点物体各自的一份副本**（`<名字>__<模型>.blend`）——**一份副本里只有一个焦点物体**，因为一条镜头就一个主体；模型保持可见并把名字记进场景属性 `mpp_focus_objects`，所以不认识这个功能的渲染器也能拍对东西。项目根同时写出 `focus_report.json`（逐副本：锚点、模型、摆放结果）。（逐场景：锚点在哪、每个模型有没有加载进来、每个 placement 的世界包围盒）。两份报告都在项目根，`scene/` 里只有 `.blend`。
+
+**已经不在磁盘上的文件无法打包**——这种情况会在生成阶段就作为问题报出来（列出前几个文件名），而不是等你渲染几小时后才发现某张贴图一直是缺失状态。`scene/` 里永远只有 `.blend` 文件，打包报告写在项目根。
+
 **序列只存动画，不存场景副本。** 每条序列把生成出来的相机动画存下来（约 150 KB，而不是几百 MB），渲染器再把它回放到 `scene/` 里的场景副本上：
 
 | | 在 265.9 MB 参考场景上实测 |
@@ -193,6 +203,8 @@ CLI 的 `--sequence-root <dir>` 会把 `sequence/` 的内容直接写进 `<dir>`
 ```
 
 JSON 详情的首段与 Unreal 参考脚本（`movie_render.py`）的键保持一致，便于既有消费方复用（`level_name`、`sequence_name`、`video_id`、`video_path`、`frame_count`、`camera_trajectory`、`text_prompt`），第二段是渲染细节（`status`、`render.engine`/`resolution`、`trajectory_export` 等）。
+
+开启焦点对象后，每条序列还在 `sequence_config.json` 的 `focus` 块（以及 sidecar 的 `extra.focus`）里记下自己用的主体：`object`、`objects`（渲染器要显示哪些物体）、`model_path`/`label`、`anchor`/`center` 世界坐标，外加 `visibility`（`visible_ratio` 等）与重定心环绕的 `orbit`。见 [焦点对象](#焦点对象focus-object)。
 
 相机轨迹 TXT 表头固定 19 列：`frame focal_length d1 d2 d3 d4 d5 r00 r01 r02 tx r10 r11 r12 ty r20 r21 r22 tz`，`d1..d5` 为保留畸变位、恒为 0。
 
@@ -238,6 +250,22 @@ blender -b -P motion_pipeline_cli.py -- --print-config
 
 `--no-sequence-blend` 仍然接受但**不做任何事**：序列已经不再写场景副本，没有东西可关。
 
+焦点物体也有整套 CLI 参数（`--focus-model`、`--focus-anchor*`、`--focus-strict` 等），见 [焦点对象](#焦点对象focus-object)；`--dry-run` 会把 focus 轴算进矩阵并逐模型列出来。
+
+### 41 运镜批处理 skill
+
+`skills/generate-41-shots/` 把"一个文件夹的场景 → 序列树"整条流程打包成一个 skill，任何有 Blender + 这份仓库的机器都能跑；它拒绝替你猜那两个属于"对这个房间的判断"的数：
+
+```bash
+python skills/generate-41-shots/inspect_scene.py --scenes /data/scenes --report /tmp/inspect.json
+python skills/generate-41-shots/make_run_config.py --scenes /data/scenes --output /data/run_0924 \
+    --items /data/item --region "-2.0,0.01,2.95:9.6,5.3,5.7" --anchor "-1.4,-1.2,0.02" --run
+python skills/generate-41-shots/verify_run.py --run /data/run_0924 \
+    --expect-cameras 3 --expect-motions 41 --expect-focus 2 --expect-sequences 246
+```
+
+`inspect_scene.py` 量场景（室内边界、地面、每台相机实际能看见什么、主体可站的环绕可行位点）；`make_run_config.py` 写运行配置并调用 CLI（`--region`/`--region-object` 与 `--anchor`/`--anchor-object` 必填，`--scenes` 支持递归遍历文件夹，`--items`/`--item` 给焦点模型）；`verify_run.py` 不需要 Blender、也不导入插件，直接读产出并报告计数、渲染设置、region 阶段分布，以及每条 arc 镜头里主体出现了多少帧。中文版说明见 `SKILL.zh-CN.md`。
+
 ---
 
 ## 无头渲染
@@ -269,7 +297,7 @@ blender -b -P render/render_sequences.py -- \
     --input-root "D:\generated" --output-root "D:\render_output" \
     --scene-filter "room*" --motion-filter "dolly_*"
 
-# 质量与引擎覆盖；不指定时用序列自己的记录（engine/samples 总是，分辨率仅在序列指定时）
+# 质量与引擎覆盖（命令行优先于序列自己的记录，见下）
 blender -b -P render/render_sequences.py -- \
     --input-root "D:\generated" --output-root "D:\render_output" \
     --engine CYCLES --device GPU --samples 128 --resolution-x 1920 --resolution-y 1080
@@ -285,6 +313,24 @@ blender -b -P render/render_sequences.py -- \
 ```
 
 退出码：`0` 成功（含"全部都渲染过了"）、`1` 至少一条序列失败、`2` 没找到序列、`3` 未预期错误。
+
+**序列里记录的引擎不是锁死的。** 生成时写进 `sequence_config.json` 的 `render.engine` / `samples` 只是**默认值**，渲染节点上的命令行参数优先：
+
+| 优先级 | 来源 |
+|---|---|
+| 1（最高） | 命令行 / 面板 Local render：`--engine`、`--device`、`--samples`、`--denoise`、`--resolution-x/y`、`--resolution-percentage`、`--fps` |
+| 2 | 序列自己的记录（`sequence_config.json` 的 `render`）：`engine` 与 `samples` 总是生效；**分辨率只在生成时显式指定过**（`resolution_explicit`）才生效 |
+| 3 | 加载的场景文件自身的设置 |
+
+所以"本机用 EEVEE 生成、远程机用 Cycles 渲染"是常规用法：
+
+```bash
+render-all.sh <seq> <out> --engine CYCLES --device GPU --samples 64 --denoise --persistent-data
+```
+
+实测（同一条记录为 `BLENDER_EEVEE` 的序列）：不加参数 → 用 `BLENDER_EEVEE` / 32 samples；加 `--engine CYCLES --device CPU --samples 4` → 用 `CYCLES` / 4 samples，两次都正常出片。**实际使用的引擎与采样数会写进输出视频旁的 `<序列>.json` 的 `render` 块**，覆盖之后数据集仍然自描述。`render-all.sh` 另有兜底：失败的序列自动换引擎重试（EEVEE→CYCLES→WORKBENCH），`--no-fallback` 关闭。
+
+两个坑：`--resolution-percentage` 可能算出**奇数**边长（例如 180 × 25% = 45），H.264 要求宽高都是偶数，Blender 会直接报 `height not divisible by 2`——用 `--resolution-x/y` 给准数，或选能整除的百分比。另外**渲染节点上的镜像必须带当前渲染器**：`--engine` 这些参数由镜像里的 `render_sequences.py` 解析，镜像没重建就用 RUNBOOK 里的实例工具包 + `MPP_RENDERER` 指过去。
 
 `--workers N` 会拉起 N 个 Blender 进程（各一批）。它只在瓶颈是"每进程"而非"每 GPU"时才有收益：EEVEE 在 GPU 上逐帧渲染，同一张卡上多个 worker 会抢 VRAM——在重场景上（3.3 M 面、34 盏投影灯、4.2 GB 常驻）3 个 worker 让每帧慢约 10 倍而不是吞吐涨 3 倍。单 GPU 机器上 `--workers 1` 最快。
 
@@ -353,6 +399,15 @@ blender -b -P /opt/mpp/blender_camera_motion_pipeline/render/pack_textures.py --
   "render": {"engine": "BLENDER_EEVEE", "samples": 32,
              "resolution_x": 1280, "resolution_y": 720, "fps": 24.0,
              "video_format": "mp4", "codec": "H264"},
+  "focus": {
+    "mode": "off",
+    "models": [{"id": "", "path": "E:/models/chair.blend", "label": "chair",
+                "object_name": "", "scale": 1.0, "rotation": [0.0, 0.0, 0.0],
+                "enabled": true}],
+    "anchor_mode": "auto", "anchor_object": "MPP_FocusAnchor",
+    "anchor_location": [0.0, 0.0, 0.0], "anchor_clearance": 0.5,
+    "keep_visible": true, "visible_ratio": 0.95, "strict": false
+  },
   "scenes": [{"path": "E:/scenes/room001.blend", "enabled": true}]
 }
 ```
@@ -419,6 +474,29 @@ local_basis = inverse(matrix_parent_inverse) @ inverse(parent_world) @ world_pos
 支持的补丁键：`keys`（整体替换）、`frame_scale`、`frame_offset`、`location_scale`、`focal_scale`、`focal`；其他键存为模板参数。
 
 **支持的模板**：文档里有多少就支持多少。参考文档有 **80** 个模板、16 个家族：`dolly_in`、`dolly_out`、`fixed`、`hitchcock`、`pan_left`、`pan_right`、`pedestal_down`、`pedestal_up`、`roll`、`tilt_down`、`tilt_up`、`truck_left`、`truck_right`、`zoom_in`、`zoom_out`（各 5 个变体，`hitchcock` 10 个）。`--motion-filter` / 面板的 **Motion filter** 可按 id 或 glob 选子集。
+
+### 41 个数据集镜头
+
+`templates/camera_motion_templates_41.json` 是第二份运动模板文档：原始数据集镜头清单里的 41 条动作（**17** 条单一、**7** 条同时、**13** 条两段式、**4** 条三段式）。它的形状与参考文档完全一致——解析器、模板库、面板和探针都按普通文档对待，加载方式也一样（`--templates`，或面板的 **Motion templates path**）。
+
+| 约定 | 取值 |
+|---|---|
+| 时间轴 | 关键帧是 24 fps 下的**绝对帧号**，镜头长 6 s，即帧 **0..144**；两段式在 72 分界，三段式在 48/96 分界（某一段没有动作就是**保持静止**） |
+| id | `<kind>_<move>`：`single_arc_cw`、`sim_dolly_in__tilt_up`、`seq_pan_left__tilt_up`、`tri_dolly_in__static__dolly_out`——`kind` 前缀是有用的：清单里"pan left + tilt up"同时和先后各有一条 |
+| 每条附带 | `dataset_key`（原始 `S01_...` 键）、`cap_zh`、`camera_sentence`、`targets`、`tier`、`group`、`moves`（每条动作的类型/方向/所在段） |
+
+| 动作 | 6 s 内的额定幅度 |
+|---|---|
+| Dolly In / Out | 前进 / 后退 3.0 m |
+| Truck Left / Right | 2.0 m |
+| Crane Up / Down | 2.0 m |
+| Pan Left / Right | 45° |
+| Tilt Up / Down | 20° |
+| Roll CW / CCW | 25° |
+| Zoom In / Out | 35 → 70 mm / 35 → 18 mm |
+| Arc CW / CCW | 绕**前方 4 m**处主体的 90° 环绕 |
+
+坐标同样按 Blender 相机局部约定书写（`location` 是 `[right, up, back]`，`-Z` 为前方）。Arc 的键落在"主体在正前方 4 m"的那个圆上、yaw 跟着环绕角走（与 `atomic_motion_templates.json` 的约定一致）；带**焦点对象**时，生成器按主体的**真实距离**重新烘焙这条环绕，真正被绕的是那个对象。幅度是**额定的**：区域盒子开着时，平移幅度会按场景大小等比缩小，角度与焦距永不缩放。用 `python tests/make_41_templates.py` 重新生成（`--verify-jsonl <41template.jsonl>` 可对照源清单逐条核对）。
 
 ---
 
@@ -489,6 +567,129 @@ CLI 同样对应：`--compound-simultaneous`、`--compound-segments`、`--compou
 
 ---
 
+## 相机可移动范围（区域盒子）
+
+在编辑器中划定一块区域，作为相机可移动的范围。区域是一个**有向盒子（OBB）**，判定的是**可行性，不是钳制**：原子运镜永远不被拉伸、缩短或强行减速；越界的镜头会被**重新抽取**，抽不出来就**如实报告**。
+
+面板：**Camera region**（侧栏 *Motion Pipeline* 里独立的一栏，排在 *Sequence output* 下面）。选好模式后，"Sequence output" 面板底部会重复一行当前盒子与判定结论，因为盒子正是写进每条 `sequence_config.json` 的东西。
+
+| 模式 | 含义 |
+|---|---|
+| `No region` | 默认，功能完全关闭（连判定都不做） |
+| `Auto from scene` | 自动按场景物体拟合盒子，忽略零散碎屑（碎屑不会把可动范围拉到整张地图） |
+| `From object` | 用某个物体的盒子，含它的旋转；勾 `Use selected` 直接取当前选中物体 |
+| `Numbers` | 手工填中心 / 尺寸 / 旋转 |
+
+盒子以 **9 个数字（中心、半尺寸、基向量）+ inset** 记进 `sequence_config.json` 的 `region` 块，渲染节点**不需要**辅助盒子或原场景也能读懂；`region.ok` / `region.exit_frames` / `region.max_excess_m` 是**只读指标**，永远不参与改动画。
+
+分级重抽（越靠前改动越小）：
+
+| 级 | 动作 |
+|---|---|
+| `L0` | 原本就合规：**原计划一字不改**，只记一次判定 |
+| `L1` | 只重抽越界的那几段（段边界、时长、其它段全部不动） |
+| `L2` | 整条计划重抽（时长、分段数、相机不变） |
+| `L3` | 优先取同族**更慢/反向**的原子（慢速 Dolly 仍是 Dolly，原子定义不改），并允许插入 hold |
+| `L4` | 把过长的段**对半切分**再重抽——小盒子只能靠短段走位 |
+| `L5` | 抽不出来：**如实失败**，记下最差帧与外溢距离（`region.strict` 打开时该序列直接跳过不写） |
+
+两条硬规则：**只有会改变相机位置的动作参与判定**（Pan/Zoom/Roll 永不因为区域被改动）；**原子运镜的定义永不被修改**，L3/L4 只是从库里"选"另一个原子。面板里的 `Safety margin` 是验收余量：路径必须离盒壁留出这么多米才算合规（因此几何上没出盒也可能被判不合规——报告里会同时给出真实越界帧数）。
+
+还有一条前提：**盒子必须包含相机的起始位置**。重抽只能缩短路径、无法移动首帧，所以起始点不在盒内时不会白跑整套重抽，而是直接记 `stage: "start-outside"`（附偏离距离 `start_clearance_m`）并给出提示——此时要么挪盒子，要么挪相机。
+
+配置示例：
+
+```json
+"region": {
+  "mode": "auto", "margin_percent": 25.0, "inset": 0.0,
+  "margin": 0.25, "attempts": [8, 8, 4, 3], "strict": false
+}
+```
+
+### 固定模板：缩放幅度，不重抽
+
+原子运镜的计划走上面的 L0-L5 阶梯；**固定模板永远不被重抽**——它就是"这一个镜头"，形状、时长、角度都是镜头本身。所以区域开着时它只做一件事：把相机相对首帧的位移**乘上同一个系数**、整条按比例演小。因为 `位置(s) = 首帧 + s × 位移` 对 `s` 是仿射的，可行区间逐帧逐轴求交即可，结果是**精确的**——单趟算完，不搜索、不试错，也不需要"抽不出来就报告"。
+
+| 记录 | 含义 |
+|---|---|
+| `stage: "fit"` | 默认走的路：算出一个统一系数并应用 |
+| `stage: "fit-failed"` | 缩到下限仍不合规（首帧本身在盒外，任何缩放都救不了） |
+| `scale` | 实际用的系数；`1.0` 表示原样就合规，模板一字未改 |
+| `ok` / `frames` / `exit_frames` / `max_excess_m` | 缩放后的判定与常规计数 |
+
+角度与焦距**永不缩放**（它们不可能把相机带出场景）；只有会改变相机位置的动作参与判定。补丁记在模板参数的 `region_fit` 里。
+
+**例外是重新定心的焦点环绕。** 它的圆心就在主体上，缩小幅度等于把相机从主体上滑走，所以它**不缩放**：只测量并如实报告，`stage` 记 `"focus-orbit"`、`scale` 记 `1.0`，再由 `region.strict` 决定这条序列留还是跳过（与阶梯的跳过契约一致）。见 [焦点对象](#焦点对象focus-object)。
+
+---
+
+## 焦点对象（Focus object）
+
+给场景添加**主体**：一个或多个 `.blend` 模型被摆到场景**唯一一个锚点**上，`Arc` 镜头改为**绕它转**，其它运动一字不改、只是把它拍进画面。这是完全可选的一节，`focus.mode` 默认 `off`，此时功能完全不进代码路径。
+
+| 配置键 | 默认 | 含义 |
+|---|---|---|
+| `mode` | `off` | `off` / `models` |
+| `models` | `[]` | 模型列表，每项：`path`、`label`、`object_name`、`scale`、`rotation`、`enabled` |
+| `anchor_mode` | `auto` | `auto`（场景最开阔处）/ `object`（`anchor_object` 指名的物体）/ `numbers`（`anchor_location`） |
+| `anchor_object` | `""` | 实际取值 `MPP_FocusAnchor`（面板按钮创建的 empty 默认名） |
+| `anchor_location` | `[0,0,0]` | 锚点世界坐标（米），`numbers` 模式用 |
+| `anchor_clearance` | `0.5` | `auto` 找点时要留出的自由空间（米） |
+| `keep_visible` | `true` | 逐序列校验主体是否真的留在画面里 |
+| `visible_ratio` | `0.95` | 判定"在画面里"所需的最低帧占比 |
+| `strict` | `false` | 主体出画的序列**不写**，直接跳过 |
+
+**一个场景一个锚点。** `auto` 从场景包围盒中心出发，落到地面高度，再沿小螺旋向外走，找第一个四周有 `anchor_clearance` 米自由空间的位置（用 fibonacci 球面 26 个方向的射线量出来）——因此中心点落在墙里、桌子里、列车里的场景也能得到可用的锚点。一个够开阔的点都找不到时，它退而取**量到的最开阔的那个位置**并写明量到了多少；完全量不出来（场景没有可见网格）才退回包围盒中心，同样会说明。`object` 取指名的物体（找不到时回退到自动位置并说明）；`numbers` 直接取输入的坐标。模型按**footprint 中心对齐锚点 x/y、包围盒底面坐在锚点高度**摆放，再施加 `rotation`/`scale`。
+
+**模型只活在暂存的场景副本里，而且每个模型有自己的一份。** 序列只装相机动画，渲染器把它回放到 `scene/` 里那份副本上，所以不在副本里的物体根本进不了画面：模型是在**准备副本时**摆进去的（`render/place_focus_objects.py`，独立 Blender 进程，与 `pack_textures.py` 同一套路）。有 N 个焦点物体就有 N 份额外副本（`<场景>__<模型>.blend`），**每份里只有一个焦点物体**——一条镜头就一个主体，渲染节点打开的文件因此自己说明了拍的是谁；模型保持可见并注册进 `mpp_focus_objects`，生成器与渲染器仍按序列调用 `apply_visibility`（这是"没有主体的序列"和"一份副本里不止一个物体"仍然正确的原因）。两个后果都是刻意的：不认这个功能的渲染器也能拍对东西；这条路径**需要项目文件夹**（面板与 CLI 的常规路径）——`--sequence-root` 那种裸序列树运行没有副本可摆。代价是磁盘：每个焦点物体一份场景副本（参考卧室 113 MB → 带模型的两份各 120–138 MB）。
+
+**矩阵乘上一个轴。** 序列仍然落在 `<场景>/<运动>/sequence_NNNNNN`，**不建 per-object 子目录**：编号在每个 motion 文件夹内按 `对象 × 相机 × 角色变体` 连续排下去，每条序列在 `sequence_config.json` 的 `focus` 块与 sidecar 的 `extra.focus` 里记下自己用的是哪个对象。渲染端要的只有数字和名字：
+
+| `sequence_config.json` → `focus` | 内容 |
+|---|---|
+| `object` / `label` / `model_path` | 这一条序列的主体（配置里的模型 id、显示名、源文件） |
+| `objects` | 该在场景副本里显示哪些物体（渲染器只凭这一项开关可见性） |
+| `anchor` / `center` | 锚点、以及主体包围盒中心的世界坐标 |
+| `visibility` | `ok`、`visible_ratio`、`visible_frames` / `frames` |
+| `orbit` | 环绕重定心后的 `radius_m`、`sweep_deg`、`direction` |
+
+`focus.mode = off` 时这个块是 `{}`；没有主体的序列（单运镜、复合镜头）也带 `{}`，渲染器据此**隐藏所有** focus 物体——整棵树在同一个 Blender 进程里渲染时，这样才不会把上一条序列的主体留在画面里。
+
+**`Arc` 才被重定心。** 模板的扫过角度与方向**原样保留**（`sweep_deg`、`direction` 就是从模板读出来的），但圆的圆心挪到主体上、半径先取相机到主体的**真实水平距离**，并把"看向主体"的朝向一次性折进**基准位姿**——所以录制下来的轨迹、校验和视频看到的是同一条路径、同一个朝向。生成的键在 3° 一步的密度上重采样（8 m 轨道上弦高误差 3 mm，若只用模板自身的 15° 键会到 68 mm）。相机到主体的水平距离小于 `0.25 m` 时拒绝环绕并说明原因（贴在主体上没法绕它转）；`Pan` 这类"会转但不是环绕"的镜头完全不动，模型也照常拍进画面。
+
+**房间放不下时改的是半径，不是运镜。** 原始距离先试；放不下（5 m 深的卧室里套 7 m 的圆，相机会穿墙）就把同一个圆按场景能接受的距离重放：候选半径要**同时**通过几何校验、留在相机限制盒内、主体在画面里，`focus.radius_source` / `focus.radius_attempts` 与运行日志都如实记下换了多少。相机搜索也不许靠"转开不看主体"来修好一条 arc——丢掉主体的候选被拒绝并记成 `focus_object_lost`；别的运镜里物体"只是存在"，搜索不受这条约束。
+
+**验证与诚实。** `keep_visible`（默认开）逐序列统计包围盒八角的投影：中心在视锥内且至少一角在内算"可见"，八角全在算"完全可见"，两个计数都记进报告；`visible_ratio`（默认 `0.95`）是门槛。达不到时如实写明（多少帧可见、需要多少），`focus.strict` 打开则直接**跳过**该序列不写——与 `region.strict` 同一套契约。相机贴到主体内部的帧也会被计入并让它判不合规。
+
+**无头 CLI 有全套 focus 参数**，面板能设的都能在命令行里说清楚：
+
+```bash
+blender -b --factory-startup -P motion_pipeline_cli.py -- \
+  --scenes room.blend --output-root "D:\projects" \
+  --templates templates/camera_motion_templates_41.json --motion-filter "single_arc_*" \
+  --focus-model "D:\models\chair.blend::Chair::1.2" --focus-model "D:\models\lamp.blend" \
+  --focus-anchor auto --focus-anchor-clearance 0.6 \
+  --no-focus-keep-visible
+```
+
+| 参数 | 作用 |
+|---|---|
+| `--focus-mode off\|models` | 总开关；给了 `--focus-model` 就自动等于 `models` |
+| `--focus-model PATH[::OBJECT[::SCALE]]` | 可重复；`OBJECT` 只取文件里的某个物体，`SCALE` 缩放模型 |
+| `--focus-anchor auto\|object\|numbers` | 位点来源 |
+| `--focus-anchor-object NAME` | `object` 模式用的空物体名（默认 `MPP_FocusAnchor`） |
+| `--focus-anchor-location X,Y,Z` | `numbers` 模式的坐标 |
+| `--focus-anchor-clearance M` | `auto` 搜索要求的净空 |
+| `--focus-keep-visible` / `--no-focus-keep-visible` | 逐序列可见性检查（默认开） |
+| `--focus-visible-ratio R` | 可见比例门槛（默认 `0.95`） |
+| `--focus-strict` / `--no-focus-strict` | 丢主体时跳过该序列（默认只记录） |
+
+`--dry-run` 会把 focus 轴算进矩阵并逐模型列出来（`N model(s), anchor …, keep_visible=…`）；`--focus-model` 写错（缺路径、比例不是数字、多了一层 `::`）走 argparse 的用法错误（退出码 2），`--focus-mode models` 却没给可用模型、或把 focus 和 `--sequence-root` 一起用（裸序列树没有场景副本可放模型）都会**在动手前**明确报错，而不是默默生成一堆没有主体的序列。旋转、显式 id 这类不常改的字段仍走 `--config`／面板。
+
+所有设置也随 `BatchConfig` 一起走（配置文件、面板 Export/Import、记住的设置、`batch_config.json`）。
+
+---
+
 ## 相机校验与自动搜索
 
 校验采样**首帧、末帧、每 `sample_step` 帧、以及 `validation.extra_sample_frames`**——绝不只是起始帧。
@@ -552,15 +753,16 @@ penalty = w_distance   · offset / 10 m
 ## 测试
 
 ```bash
-# 全量（纯 Python 套件 + Blender 套件）—— 241 个用例
+# 全量（纯 Python 套件 + Blender 套件）—— 294 个用例
 blender -b -P blender_camera_motion_pipeline/tests/run_blender_tests.py
 
-# 只跑纯套件，不需要 Blender —— 144 个用例
+# 只跑纯套件，不需要 Blender —— 177 个用例
 python blender_camera_motion_pipeline/tests/run_blender_tests.py
 
 # 单个套件也能独立运行
 blender -b -P blender_camera_motion_pipeline/tests/test_blender_integration.py
 blender -b -P blender_camera_motion_pipeline/tests/test_animation_api.py
+blender -b -P blender_camera_motion_pipeline/tests/test_focus_objects.py
 python blender_camera_motion_pipeline/tests/test_project_layout.py
 
 # 端到端验收（真实 80 模板文档，走 CLI + 渲染器）
@@ -582,25 +784,33 @@ python blender_camera_motion_pipeline/tests/probe_template_contract.py -- \
 
 环境变量：`MP_KEEP_TEST_OUTPUT=1` 保留集成测试产物、`MP_KEEP_E2E=1` 保留端到端产物、`MP_TEST_TRACEBACK=1` 打印完整 traceback。`tests/_boot.py` 让套件与探针在插件文件夹被改名后仍能独立 import 插件包。
 
+两个入口都值得跑一遍：`run_blender_tests.py` 把全部套件放进**同一个** Blender 进程，套件也可以像上面那样一个一个跑。用例自己负责重建夹具（临时目录里的模型/场景被别的后台 Blender 进程清掉时会自动补），所以两种跑法都应当是满绿。
+
 ### 本机结果（Blender 5.2.2 LTS / Windows）
 
 | 套件 | 用例 | 结果 |
 |---|---|---|
 | `test_path_utils` | 16 | 通过 |
-| `test_config` | 18 | 通过 |
-| `test_project_layout` | 15 | 通过 |
+| `test_config` | 19 | 通过 |
+| `test_project_layout` | 14 | 通过 |
 | `test_motion_templates` | 33 | 通过 |
 | `test_motion_composite` | 23 | 通过 |
+| `test_region` | 14 | 通过 |
+| `test_region_planner` | 10 | 通过 |
+| `test_region_wiring` | 9 | 通过 |
 | `test_camera_validation` | 39 | 通过 |
-| `test_animation_api` | 10 | 通过 |
+| `test_animation_api` | 12 | 通过 |
 | `test_addon_lifecycle` | 10 | 通过 |
 | `test_render_workflow` | 18 | 通过 |
-| `test_blender_integration` | 59 | 通过 |
-| **合计** | **241** | **通过** |
+| `test_focus_objects` | 16 | 通过（含 CLI 参数与渲染端显示/隐藏） |
+| `test_blender_integration` | 61 | 通过 |
+| **合计** | **294**（纯 Python 177 + Blender 117） | 合并运行 294 通过 |
 
-`tests/static_check.py` 另外检查全包无未使用 import、无遗留调试标记；其中一个集成用例用桩 layout 驱动**每个面板的 `draw()`**，避免"面板读了已不存在的属性、直到用户打开侧栏才崩"。
+纯套件（177 个用例）两种跑法都通过——它不需要 Blender，也是没有 Blender 的机器上唯一能跑的部分。Blender 套件仍在扩充，用例数会变。
 
-端到端验收：**10/10 阶段**通过——构建 3 个夹具场景 → CLI 预演 → 用真实 80 模板文档生成 20 条序列 → 项目文件夹检查（只有 `sequence/` + `scene/` + `video/`，数据齐全且自描述）→ 产物布局检查 → **用插件包（生产环境是镜像内）的渲染器渲染出 20 个视频到 `<project>/video`** → 每条视频都有配套 JSON + 轨迹 TXT → `ffprobe` 确认 H.264 与 81 帧 → 重跑渲染器跳过已完成序列并退出 0 → `--list` 枚举状态。日志见 `E2E_ACCEPTANCE_20260919.txt`。
+`tests/static_check.py` 检查全包无未使用 import、无遗留调试标记，并且会拦住两个 README 的编码损伤（`U+FFFD`，以及英文文档里的任何 CJK 字符）；其中一个集成用例用桩 layout 驱动**每个面板的 `draw()`**，避免"面板读了已不存在的属性、直到用户打开侧栏才崩"。
+
+端到端验收：**10/10 阶段**通过——构建 3 个夹具场景 → CLI 预演 → 用真实 80 模板文档生成 20 条序列 → 项目文件夹检查（只有 `sequence/` + `scene/` + `video/`，数据齐全且自描述）→ 产物布局检查 → **用插件包（生产环境是镜像内）的渲染器渲染出 20 个视频到 `<project>/video`** → 每条视频都有配套 JSON + 轨迹 TXT → `ffprobe` 确认 H.264 与 81 帧 → 重跑渲染器跳过已完成序列并退出 0 → `--list` 枚举状态。日志见 `E2E_ACCEPTANCE_20260919.txt`。插件也被装进真实的 Blender add-ons 目录验证过：能启用、暴露全部 **26 个 operator 与 10 个面板**、自动发现并预填模板文档（80 个模板）、并能干净卸载。
 
 ---
 
@@ -618,15 +828,18 @@ blender_camera_motion_pipeline/
 ├── core/              编排（需要 bpy）
 │   ├── scene_loader.py / blender_context.py
 │   ├── sequence_generator.py   单条序列：校验 → 搜索 → 烘焙 → 写盘
-│   ├── batch_runner.py         场景 × 运动 × 相机 × 角色
+│   ├── batch_runner.py         场景 × 运动 × 相机 × 角色 × 焦点对象
+│   ├── focus.py                焦点对象：锚点、环绕重定心、可见性、场景注册表
+│   ├── region.py               区域盒子：指标与固定模板的精确缩放
 │   ├── project.py              一次运行写出的精简（纯数据）项目文件夹
 │   ├── camera_animation.py     动画负载与回放
 │   ├── sequence_manager.py     输出树的只读视图
 │   └── ui_task.py              可取消的增量 timer 状态机
-├── camera/            motion_templates / scene_context / camera_validator / camera_search / camera_export
+├── camera/            motion_templates / scene_context / camera_validator / camera_search / region_planner / camera_export
 ├── character/         base_provider / null_provider / blender_provider / library
 ├── io/                path_utils / json_io / manifest / resource_check
-├── render/            render_sequences.py / pack_textures.py / render_runner.py / metadata_exporter.py
+├── render/            render_sequences.py / pack_textures.py / place_focus_objects.py / render_runner.py / metadata_exporter.py
+├── templates/         运动模板文档（数据，非代码）：80 模板参考集 / 41 个数据集镜头 / 49 条原子运镜 / light / test
 ├── utils/             logging_utils / task_control / animation / version
 └── tests/             harness + 套件 + 探针（含 _boot.py）
 ```
@@ -660,6 +873,8 @@ blender_camera_motion_pipeline/
 9. **进度按序列而非按帧**：一条很长的序列不报告中间进度，`Stop task` 会等它结束。
 10. **生成的运动替换相机自身动画**，锚定在相机起始位姿（见烘焙契约）。挂在运动 rig 上的相机保持模板的世界路径而非跟随 rig，主体会穿过画面——这是自洽的（轨迹、校验、渲染一致），但不等同于"在 rig 原有运动上叠加一个 dolly"。
 11. **EEVEE 的开销来自场景本身**：34 盏投影灯 + 3.3 M 面的场景在 1280×720/32 samples 下约 23 秒/帧（RTX 4060 Laptop，GPU 利用率约 99%、常驻 4.2 GB，属 GPU 受限而非配置错误）。批量前用 `tests/probe_render_cost.py` 估算时间。
+12. **焦点对象需要暂存好的项目副本，而且是每个对象一份。** 模型是在准备 `scene/` 副本时烘进去的（`<场景>__<模型>.blend`，一份里只有一个主体，可见并注册为 `mpp_focus_objects`），因为序列只装相机动画——所以 `--sequence-root` 那种裸序列树运行没有地方放对象，那条路径上这个轴是空的。模型按**footprint 中心 + 包围盒底面**落在锚点上；只有模型文件真正带进来的物体才会被登记，一个什么都没带进来的模型会被报告并跳过，而不是变成一文件夹没有主体的序列。
+13. **环绕重定心只作用于固定模板，不作用于复合计划。** 复合/原子计划保留自己的 Arc（它按额定的主体距离写）；`Arc` 的识别方式与文档写法一致（模板参数里的 `type`，或 id 以 `arc` 开头）。重新定心的环绕一旦离开区域盒子会被**如实报告**（`stage: "focus-orbit"`）而**不是**被缩小——它的半径就是相机到主体的距离，缩幅度等于把相机从主体上滑走——由 `region.strict` 决定这条序列留不留。
 
 ---
 

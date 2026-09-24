@@ -167,13 +167,20 @@ def _read_list(raw: dict, key: str, default, warnings: "list[str]"):
 
 
 def _read_float_list(raw: dict, key: str, default, warnings: "list[str]"):
+    """A list of numbers, kept as floats.
+
+    ``int()`` here (the obvious-looking cast, and what this did) silently truncates:
+    a region box of ``[8.5, 12.25, 4.0]`` came back as ``[8, 12, 4]``, and an anchor
+    at ``[1.5, 2.5, 0]`` moved a metre.  Numbers are floats; the callers that want
+    counts (``region.attempts``) read them with :func:`_read_list` themselves.
+    """
     values = _read_list(raw, key, default, warnings)
     out = []
     for item in values:
         try:
-            out.append(int(item))
+            out.append(float(item))
         except (TypeError, ValueError):
-            warnings.append(f"{key}: ignoring non-integer entry {item!r}")
+            warnings.append(f"{key}: ignoring non-numeric entry {item!r}")
     return out
 
 
@@ -516,6 +523,9 @@ class BatchSection:
     #: switch any more -- a config file that still sets ``save_sequence_blend`` gets
     #: an "unknown key" warning.
     save_validation_report: bool = True
+    #: Keep validation_report.json / generation_log.txt / batch_report.json even when
+    #: every sequence succeeded (default: they are only kept for failures).
+    keep_reports: bool = False
     verbose: bool = True
     character_asset_root: str = ""
     animation_asset_root: str = ""
@@ -544,6 +554,7 @@ class BatchSection:
             overwrite=_read_typed(raw, "overwrite", bool, False, warnings),
             resume=_read_typed(raw, "resume", bool, True, warnings),
             save_validation_report=_read_typed(raw, "save_validation_report", bool, True, warnings),
+            keep_reports=_read_typed(raw, "keep_reports", bool, False, warnings),
             verbose=_read_typed(raw, "verbose", bool, True, warnings),
             character_asset_root=_read_typed(raw, "character_asset_root", str, "", warnings),
             animation_asset_root=_read_typed(raw, "animation_asset_root", str, "", warnings),
@@ -785,6 +796,202 @@ class CompositeSection:
 
 
 @dataclass
+class RegionSection:
+    """Where the camera may travel: one oriented box in world space.
+
+    The box is a *feasibility* rule, never a clamp: atomic motions keep their meaning and
+    a plan that leaves the box is re-drawn (or reported), not bent.  ``mode`` picks how the
+    box is found -- ``off``, ``auto`` (fit to the scene's own objects, ignoring scattered
+    debris), ``object`` (use one object's box) or ``numbers`` (the values below).
+    """
+
+    mode: str = "off"
+    object_name: str = ""
+    center: list = field(default_factory=lambda: [0.0, 0.0, 0.0])
+    size: list = field(default_factory=lambda: [8.0, 8.0, 4.0])
+    rotation: list = field(default_factory=lambda: [0.0, 0.0, 0.0])
+    margin_percent: float = 25.0
+    inset: float = 0.0
+    helper_object: str = ""
+    margin: float = 0.25
+    attempts: list = field(default_factory=lambda: [8, 8, 4, 3])
+    #: ``True``: a shot whose path still leaves the box is not written at all.
+    strict: bool = False
+
+    @property
+    def enabled(self) -> bool:
+        return str(self.mode or "off").strip().lower() not in ("", "off", "none", "false")
+
+    @classmethod
+    def from_dict(cls, raw: dict, warnings: "list[str]"):
+        return cls(
+            mode=_read_choice(
+                raw, "mode", ("off", "auto", "object", "numbers"), "off", warnings
+            ),
+            object_name=_read_typed(raw, "object_name", str, "", warnings),
+            center=_read_float_list(raw, "center", [0.0, 0.0, 0.0], warnings),
+            size=_read_float_list(raw, "size", [8.0, 8.0, 4.0], warnings),
+            rotation=_read_float_list(raw, "rotation", [0.0, 0.0, 0.0], warnings),
+            margin_percent=_read_typed(raw, "margin_percent", float, 25.0, warnings),
+            inset=_read_typed(raw, "inset", float, 0.0, warnings),
+            helper_object=_read_typed(raw, "helper_object", str, "", warnings),
+            margin=_read_typed(raw, "margin", float, 0.25, warnings),
+            attempts=_read_list(raw, "attempts", [8, 8, 4, 3], warnings),
+            strict=_read_typed(raw, "strict", bool, False, warnings),
+        )
+
+    def validate(self) -> None:
+        if str(self.mode).strip().lower() not in ("off", "auto", "object", "numbers"):
+            raise ConfigError(f"region.mode must be off/auto/object/numbers, got {self.mode!r}")
+        if self.mode == "object" and not str(self.object_name).strip():
+            raise ConfigError("region.mode is 'object' but region.object_name is empty")
+        for name in ("center", "size", "rotation"):
+            values = list(getattr(self, name) or [])
+            if len(values) != 3:
+                raise ConfigError(f"region.{name} needs exactly 3 numbers, got {values!r}")
+            setattr(self, name, [float(v) for v in values])
+        if any(float(v) <= 0.0 for v in self.size):
+            raise ConfigError(f"region.size must be positive, got {self.size!r}")
+        if float(self.inset) < 0.0:
+            raise ConfigError(f"region.inset must not be negative, got {self.inset}")
+        attempts = [int(v) for v in (self.attempts or [])]
+        while len(attempts) < 4:
+            attempts.append(0)
+        if any(v < 0 for v in attempts[:4]):
+            raise ConfigError(f"region.attempts must be 4 non-negative numbers, got {attempts!r}")
+        self.attempts = attempts[:4]
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
+class FocusSection:
+    """The subject an ``Arc`` shot orbits, and where it stands.
+
+    ``mode`` is ``off`` (feature completely out of the code paths) or ``models``, in
+    which case every enabled entry of ``models`` becomes one axis of the output matrix
+    -- ``scene x camera x motion x focus object`` -- and the object is placed on the
+    scene's single **anchor point**.  Each model is a ``.blend`` file plus, optionally,
+    the one object to take from it, a scale and a rotation.
+
+    ``anchor_mode`` says how the anchor is found: ``auto`` (the middle of the open part
+    of the scene), ``object`` (an empty the user placed, ``anchor_object``) or
+    ``numbers`` (``anchor_location``).  ``keep_visible`` turns the per-sequence check
+    that the object really stayed in frame into a hard requirement (``strict`` skips
+    the sequence instead of writing a shot whose subject is off-screen).
+    """
+
+    mode: str = "off"
+    models: list = field(default_factory=list)
+    anchor_mode: str = "auto"
+    anchor_object: str = ""
+    anchor_location: list = field(default_factory=lambda: [0.0, 0.0, 0.0])
+    #: Free space the automatic anchor looks for, in metres.
+    anchor_clearance: float = 0.5
+    keep_visible: bool = True
+    #: Share of the frames the object has to be in frame for (``keep_visible``).
+    visible_ratio: float = 0.95
+    strict: bool = False
+
+    @property
+    def enabled(self) -> bool:
+        return str(self.mode or "off").strip().lower() == "models"
+
+    @property
+    def model_count(self) -> int:
+        return sum(1 for item in self.models or [] if isinstance(item, dict)
+                   and item.get("path") and item.get("enabled", True))
+
+    @classmethod
+    def from_dict(cls, raw: dict, warnings: "list[str]"):
+        models: "list[dict]" = []
+        for index, item in enumerate(_read_list(raw, "models", [], warnings)):
+            if not isinstance(item, dict):
+                warnings.append(f"focus.models[{index}] is not an object; ignored")
+                continue
+            models.append({
+                "id": str(item.get("id") or ""),
+                "path": str(item.get("path") or ""),
+                "label": str(item.get("label") or item.get("name") or ""),
+                "object_name": str(item.get("object_name") or item.get("object") or ""),
+                "scale": float(item.get("scale") or 1.0),
+                "rotation": [float(v) for v in list(item.get("rotation") or [0.0, 0.0, 0.0])[:3]],
+                "enabled": bool(item.get("enabled", True)),
+            })
+        return cls(
+            mode=_read_choice(raw, "mode", ("off", "models"), "off", warnings),
+            models=models,
+            anchor_mode=_read_choice(
+                raw, "anchor_mode", ("auto", "object", "numbers"), "auto", warnings
+            ),
+            anchor_object=_read_typed(raw, "anchor_object", str, "", warnings),
+            anchor_location=_read_float_list(raw, "anchor_location", [0.0, 0.0, 0.0], warnings),
+            anchor_clearance=_read_typed(raw, "anchor_clearance", float, 0.5, warnings),
+            keep_visible=_read_typed(raw, "keep_visible", bool, True, warnings),
+            visible_ratio=_read_typed(raw, "visible_ratio", float, 0.95, warnings),
+            strict=_read_typed(raw, "strict", bool, False, warnings),
+        )
+
+    def validate(self) -> None:
+        mode = str(self.mode).strip().lower()
+        if mode not in ("off", "models"):
+            raise ConfigError(f"focus.mode must be off/models, got {self.mode!r}")
+        if str(self.anchor_mode).strip().lower() not in ("auto", "object", "numbers"):
+            raise ConfigError(
+                f"focus.anchor_mode must be auto/object/numbers, got {self.anchor_mode!r}"
+            )
+        values = list(self.anchor_location or [])
+        if len(values) != 3:
+            raise ConfigError(
+                f"focus.anchor_location needs exactly 3 numbers, got {values!r}"
+            )
+        self.anchor_location = [float(v) for v in values]
+        self.visible_ratio = float(self.visible_ratio)
+        if not 0.0 <= self.visible_ratio <= 1.0:
+            raise ConfigError(
+                f"focus.visible_ratio must be between 0 and 1, got {self.visible_ratio}"
+            )
+        if float(self.anchor_clearance) < 0.0:
+            raise ConfigError(
+                f"focus.anchor_clearance must not be negative, got {self.anchor_clearance}"
+            )
+        cleaned: "list[dict]" = []
+        seen: "set[str]" = set()
+        for index, item in enumerate(self.models or []):
+            if not isinstance(item, dict):
+                raise ConfigError(f"focus.models[{index}] must be an object")
+            path = str(item.get("path") or "").strip()
+            if not path:
+                raise ConfigError(f"focus.models[{index}] has an empty path")
+            identifier = str(item.get("id") or "").strip()
+            if identifier and identifier in seen:
+                raise ConfigError(f"focus.models[{index}] repeats the id {identifier!r}")
+            if identifier:
+                seen.add(identifier)
+            rotation = [float(v) for v in list(item.get("rotation") or [0.0, 0.0, 0.0])[:3]]
+            while len(rotation) < 3:
+                rotation.append(0.0)
+            cleaned.append({
+                "id": identifier,
+                "path": path,
+                "label": str(item.get("label") or ""),
+                "object_name": str(item.get("object_name") or ""),
+                "scale": float(item.get("scale") or 1.0),
+                "rotation": rotation,
+                "enabled": bool(item.get("enabled", True)),
+            })
+        self.models = cleaned
+        if mode == "models" and not self.model_count:
+            raise ConfigError(
+                "focus.mode is 'models' but no enabled model with a path is configured"
+            )
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
 class BatchConfig:
     """Whole-run configuration."""
 
@@ -795,6 +1002,8 @@ class BatchConfig:
     search: SearchSection = field(default_factory=SearchSection)
     render: RenderSection = field(default_factory=RenderSection)
     composite: CompositeSection = field(default_factory=CompositeSection)
+    region: RegionSection = field(default_factory=RegionSection)
+    focus: FocusSection = field(default_factory=FocusSection)
     scenes: list = field(default_factory=list)
     warnings: list = field(default_factory=list)
 
@@ -807,6 +1016,8 @@ class BatchConfig:
             "search": self.search.to_dict(),
             "render": self.render.to_dict(),
             "composite": self.composite.to_dict(),
+            "region": self.region.to_dict(),
+            "focus": self.focus.to_dict(),
         }
         if include_scenes:
             payload["scenes"] = list(self.scenes)
@@ -848,6 +1059,8 @@ class BatchConfig:
         search_raw = _sub_dict(source, "search", warnings)
         render_raw = _sub_dict(source, "render", warnings)
         composite_raw = _sub_dict(source, "composite", warnings)
+        region_raw = _sub_dict(source, "region", warnings)
+        focus_raw = _sub_dict(source, "focus", warnings)
         scenes_raw = _read_list(source, "scenes", instance.scenes, warnings)
 
         if batch_raw:
@@ -865,6 +1078,14 @@ class BatchConfig:
         if composite_raw:
             instance.composite = _section_from_dict(
                 CompositeSection, composite_raw, section_base.composite, warnings
+            )
+        if region_raw:
+            instance.region = _section_from_dict(
+                RegionSection, region_raw, section_base.region, warnings
+            )
+        if focus_raw:
+            instance.focus = _section_from_dict(
+                FocusSection, focus_raw, section_base.focus, warnings
             )
         instance.scenes = scenes_raw
         _report_unknown(source, "config", warnings)
@@ -913,6 +1134,8 @@ def validate_batch_config(config: BatchConfig, *, require_output: bool = True) -
         config.render.validate()
         config.motion.unit_scale.validate()
         config.composite.validate()
+        config.region.validate()
+        config.focus.validate()
     except ConfigError as exc:
         problems.append(str(exc))
     for index, scene in enumerate(config.scenes):
@@ -949,6 +1172,15 @@ def describe_config(config: BatchConfig) -> str:
             f" duration={'%g-%g' % config.composite.effective_duration_range()}s"
             f" output={config.composite.output_mode} seed={config.composite.seed}"
             if config.composite.enabled else "composite      : off"
+        ),
+        (
+            "focus objects  : "
+            + (
+                f"{config.focus.model_count} model(s) anchor={config.focus.anchor_mode}"
+                f" keep_visible={config.focus.keep_visible}"
+                f" {'strict' if config.focus.strict else 'lenient'}"
+                if config.focus.enabled else "off"
+            )
         ),
         f"scenes         : {len(config.scenes)}",
     ]

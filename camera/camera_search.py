@@ -102,15 +102,20 @@ class SearchCandidate:
 class CandidateEvaluation:
     candidate: SearchCandidate
     report: ValidationReport
+    #: Set when a candidate passed the geometry checks but an extra veto (the
+    #: focus object leaving the frame) rejected it anyway.
+    rejected_reason: str = ""
 
     @property
     def passed(self) -> bool:
-        return self.report.passed
+        return self.report.passed and not self.rejected_reason
 
     def to_dict(self, *, include_frames: bool = False) -> dict:
         return {
             "candidate": self.candidate.to_dict(),
             "passed": bool(self.report.passed),
+            "accepted": self.passed,
+            "rejected_reason": self.rejected_reason,
             "score": round(float(self.report.score), 6),
             "reasons": self.report.failures,
             "metrics": {
@@ -505,8 +510,14 @@ class CameraSearch:
         base_matrix: Sequence[Sequence[float]] | None = None,
         project=None,
         original_report: "ValidationReport | None" = None,
+        veto: "Callable[[SearchCandidate, MotionAnimation], str | None] | None" = None,
     ) -> SearchResult:
-        """Try to find a passing camera position near the original one."""
+        """Try to find a passing camera position near the original one.
+
+        ``veto`` is an optional last word on a candidate that already passed the
+        geometry checks: it returns a reason string to reject it or ``None`` to
+        accept.  The generator uses it to keep a focus object in frame.
+        """
         result = SearchResult(seed=int(self.section.random_seed), original_report=original_report)
         if not self.section.enabled:
             result.messages.append("camera search is disabled; keeping the original camera position")
@@ -580,14 +591,29 @@ class CameraSearch:
                     character=character, base_matrix=base_matrix,
                     base_focal=base_focal, project=project,
                 )
-                del full_animation
                 evaluation = CandidateEvaluation(candidate=candidate, report=report)
+                if report.passed and veto is not None:
+                    # Geometry alone is not enough once the shot has a subject: a
+                    # candidate that clears every wall but no longer shows what the
+                    # sequence is *of* is not a fix.  Measured on a real 90-degree
+                    # arc -- the search walked the camera 1.9 m sideways and 87 deg
+                    # off the authored pose (which was grazing a wall) and took the
+                    # subject from 145/145 frames in frame down to 0/145.
+                    try:
+                        rejection = veto(candidate, full_animation)
+                    except Exception as exc:  # a broken veto must not kill the run
+                        if self.logger is not None:
+                            self.logger.warning("search candidate veto failed: %s", exc)
+                        rejection = None
+                    if rejection:
+                        evaluation.rejected_reason = str(rejection)
+                del full_animation
                 result.evaluations.append(evaluation)
                 if best_overall is None or report.score > best_overall.report.score:
                     best_overall = evaluation
                     round_summary["best_score"] = round(float(report.score), 6)
                     round_summary["best_candidate"] = candidate.describe()
-                if report.passed:
+                if evaluation.passed:
                     best_valid = evaluation
                     found_this_round += 1
                     result.accepted.append(candidate)
@@ -598,6 +624,14 @@ class CameraSearch:
                     if len(result.accepted) >= max(1, int(self.section.max_output_candidates)):
                         break
                 else:
+                    if evaluation.rejected_reason:
+                        round_summary["top_reasons"][evaluation.rejected_reason] = (
+                            round_summary["top_reasons"].get(evaluation.rejected_reason, 0) + 1
+                        )
+                        result.messages.append(
+                            f"round {round_index}: rejected {candidate.describe()} "
+                            f"(score {report.score:.4f}) -- {evaluation.rejected_reason}"
+                        )
                     for reason in report.failures:
                         round_summary["top_reasons"][reason] = (
                             round_summary["top_reasons"].get(reason, 0) + 1

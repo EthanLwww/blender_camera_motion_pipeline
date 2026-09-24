@@ -137,6 +137,29 @@ def build_suite() -> Suite:
         equal(merged.search.candidate_count, 16)
         close(merged.search.max_radius, 2.5)
 
+    @suite.case("fractional boxes, anchors and offsets keep their fractions")
+    def _():
+        # ``_read_float_list`` used to cast with int(), so a region box of
+        # [8.5, 12.25, 4.0] came back as [8, 12, 4] and an anchor at [1.5, 2.5, 0]
+        # moved a metre -- silently, and only when the config came from a file.
+        config = BatchConfig.from_dict({
+            "region": {"mode": "numbers", "center": [1.5, -2.25, 0.75],
+                       "size": [8.5, 12.25, 4.0], "rotation": [0.0, 12.5, -7.25]},
+            "focus": {"mode": "models", "models": [{"path": "a.blend"}],
+                      "anchor_location": [1.5, 2.5, 0.0], "anchor_clearance": 0.75},
+        })
+        equal(list(config.region.center), [1.5, -2.25, 0.75])
+        equal(list(config.region.size), [8.5, 12.25, 4.0])
+        equal(list(config.region.rotation), [0.0, 12.5, -7.25])
+        equal(list(config.focus.anchor_location), [1.5, 2.5, 0.0])
+        close(config.focus.anchor_clearance, 0.75)
+        # and the numbers survive the round trip a saved config makes
+        again = BatchConfig.from_dict(config.to_dict())
+        equal(list(again.region.size), [8.5, 12.25, 4.0])
+        equal(list(again.focus.anchor_location), [1.5, 2.5, 0.0])
+        # the region's attempts are counts, not measurements: still whole numbers
+        equal(list(config.region.attempts), [8, 8, 4, 3])
+
     @suite.case("to_dict / from_dict round trip is lossless")
     def _():
         original = BatchConfig.from_dict({

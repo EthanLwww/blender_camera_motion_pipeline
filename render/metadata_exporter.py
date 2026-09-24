@@ -20,6 +20,254 @@ from ..io.path_utils import ensure_dir, normalize_path, relative_to, to_forward_
 from ..utils.version import GENERATOR_VERSION, generator_stamp
 
 
+def _slot_fcurves(action, slot=None):
+    """The F-curves of one action *slot* (Blender 4.4+ layered actions).
+
+    One action can drive several IDs -- the generator ends up with a single
+    ``CameraAction`` holding a *Camera* slot for the object and another for the
+    camera data (``lens``) -- so the curves have to be taken per slot, or the object's
+    set would look like it animates ``lens``.  Falls back to every curve when this
+    Blender has no layers (the historical flat ``Action.fcurves`` layout).
+    """
+    from ..utils.animation import action_fcurves
+
+    layers = getattr(action, "layers", None)
+    if not layers:
+        return action_fcurves(action)
+    curves = []
+    for layer in layers or []:
+        for strip in getattr(layer, "strips", []) or []:
+            bag = None
+            lookup = getattr(strip, "channelbag", None)
+            if slot is not None and callable(lookup):
+                try:
+                    bag = lookup(slot)
+                except Exception:
+                    bag = None
+            if bag is not None:
+                curves.extend(list(getattr(bag, "fcurves", []) or []))
+                continue
+            for candidate in getattr(strip, "channelbags", []) or []:
+                if slot is None or getattr(candidate, "slot", None) is slot:
+                    curves.extend(list(getattr(candidate, "fcurves", []) or []))
+    return curves
+
+
+def _fcurve_index(action, slot=None):
+    """``{(data_path, array_index): fcurve}`` for *action*, or None if it is unusable.
+
+    ``Action.fcurves`` no longer exists in Blender 5 (layered actions), so the walk
+    goes through the slot's channelbag.  Duplicate keys or an unreadable action return
+    None so the caller falls back to the dependency graph.
+    """
+    curves = {}
+    try:
+        flat = _slot_fcurves(action, slot)
+    except Exception:
+        return None
+    if not flat:
+        return None
+    for curve in flat:
+        try:
+            key = (str(curve.data_path), int(curve.array_index))
+        except Exception:
+            return None
+        if key in curves:
+            return None
+        curves[key] = curve
+    return curves
+
+
+def _slot_of(animation_data):
+    """The action slot an ID uses, or None when this Blender has no slots."""
+    return getattr(animation_data, "action_slot", None)
+
+
+def _curve_value(curves, path, index, default, evaluate):
+    curve = curves.get((path, index))
+    if curve is None:
+        return float(default)
+    try:
+        value = float(evaluate(curve))
+    except Exception:
+        return float(default)
+    return value if math.isfinite(value) else float(default)
+
+
+def _analytic_plan(camera_object):
+    """``(plan, reason)``: how to evaluate this camera from F-curves, or why not.
+
+    The plan is a dict with ``curves``/``data_curves`` (F-curve maps), ``mode`` and
+    ``rotation_path``; ``reason`` is "" when the plan is usable.
+    """
+    obj = camera_object
+    if obj is None:
+        return None, "no camera"
+    if getattr(obj, "parent", None) is not None:
+        return None, "camera is parented"
+    if len(getattr(obj, "constraints", ()) or ()):
+        return None, "camera has constraints"
+    anim = getattr(obj, "animation_data", None)
+    if anim is None or anim.action is None:
+        return None, "camera has no action"
+    if len(getattr(anim, "drivers", ()) or ()):
+        return None, "camera has drivers"
+    if len(getattr(anim, "nla_tracks", ()) or ()):
+        return None, "camera has NLA tracks"
+    if str(getattr(anim, "action_blend_type", "REPLACE") or "REPLACE") != "REPLACE":
+        return None, "action blend type is %s" % anim.action_blend_type
+
+    mode = str(getattr(obj, "rotation_mode", "XYZ") or "XYZ").upper()
+    if mode == "AXIS_ANGLE":
+        return None, "rotation mode AXIS_ANGLE"
+    rotation_path = {"QUATERNION": "rotation_quaternion"}.get(
+        mode, "rotation_%s" % mode.lower())
+
+    curves = _fcurve_index(anim.action, _slot_of(anim))
+    if curves is None:
+        return None, "camera action is not a plain F-curve action"
+    allowed = {"location", "scale", rotation_path}
+    unexpected = sorted({path for path, _index in curves if path not in allowed})
+    if unexpected:
+        return None, "camera action animates %s" % ", ".join(unexpected)
+
+    data = getattr(obj, "data", None)
+    data_curves = {}
+    lens_animated = False
+    if data is not None and getattr(data, "animation_data", None) is not None:
+        data_anim = data.animation_data
+        if len(getattr(data_anim, "drivers", ()) or ()):
+            return None, "camera data has drivers"
+        if len(getattr(data_anim, "nla_tracks", ()) or ()):
+            return None, "camera data has NLA tracks"
+        if data_anim.action is not None:
+            data_curves = _fcurve_index(data_anim.action, _slot_of(data_anim))
+            if data_curves is None:
+                return None, "camera data action is not a plain F-curve action"
+            odd = sorted({path for path, _index in data_curves if path != "lens"})
+            if odd:
+                return None, "camera data animates %s" % ", ".join(odd)
+            lens_animated = any(path == "lens" for path, _index in data_curves)
+    if not curves and not data_curves:
+        return None, "camera has no usable curves"
+
+    return {
+        "curves": curves,
+        "data_curves": data_curves,
+        "mode": mode,
+        "rotation_path": rotation_path,
+        "lens_animated": lens_animated,
+        "data": data,
+    }, ""
+
+
+def analytic_camera_reason(camera_object) -> str:
+    """``""`` when the camera can be evaluated from F-curves, else why it cannot.
+
+    Kept separate from :func:`analytic_camera_poses` so a probe (or a log line) can
+    explain *why* a scene fell back to the dependency graph.
+    """
+    return _analytic_plan(camera_object)[1]
+
+
+def analytic_camera_poses(camera_object, frames) -> "list[tuple[object, float]] | None":
+    """Camera ``(matrix_world, lens)`` per frame, evaluated from F-curves only.
+
+    The trajectory export needs the camera pose of every frame, and the honest way to
+    get it -- ``scene.frame_set()`` plus a depsgraph update -- re-evaluates the whole
+    scene.  On a scene with geometry-node scattering that is seconds *per frame*, so a
+    216-frame sequence spent minutes producing a trajectory before the first frame was
+    even rendered.
+
+    When the camera is a plain F-curve camera (no parent, no constraints, no drivers,
+    no NLA, only ``location`` / ``rotation_*`` / ``scale`` animated, plus an optional
+    animated ``lens``), the pose can be evaluated straight from the curves, exactly
+    and without touching the dependency graph.
+
+    Returns None whenever the camera does not fit that shape, so the caller can fall
+    back to the dependency graph instead of guessing.
+    """
+    import bpy  # noqa: F401  (kept local: the module is imported outside Blender too)
+
+    plan, reason = _analytic_plan(camera_object)
+    if plan is None:
+        return None
+    base = camera_object
+    curves = plan["curves"]
+    data_curves = plan["data_curves"]
+    mode = plan["mode"]
+    rotation_path = plan["rotation_path"]
+    data = plan["data"]
+
+    from mathutils import Euler, Matrix, Quaternion, Vector
+
+    poses = []
+    for frame in frames:
+        def value(path, index, default, _frame=frame):
+            return _curve_value(curves, path, index, default,
+                                lambda curve: curve.evaluate(_frame))
+
+        location = Vector([value("location", i, base.location[i]) for i in range(3)])
+        scale = Vector([value("scale", i, base.scale[i]) for i in range(3)])
+        if mode == "QUATERNION":
+            components = [value("rotation_quaternion", i, base.rotation_quaternion[i])
+                          for i in range(4)]
+            quaternion = Quaternion(components)
+        else:
+            order = mode if len(mode) == 3 else "XYZ"
+            angles = [value(rotation_path, i, base.rotation_euler[i]) for i in range(3)]
+            quaternion = Euler(angles, order).to_quaternion()
+        try:
+            matrix = Matrix.LocRotScale(location, quaternion, scale)
+        except Exception:
+            return None
+        lens = float(getattr(data, "lens", 35.0) or 35.0)
+        if plan["lens_animated"]:
+            lens = _curve_value(data_curves, "lens", 0, lens,
+                                lambda curve: curve.evaluate(frame))
+        poses.append((matrix, lens))
+    return poses
+
+
+def verify_camera_poses(
+    camera_object,
+    scene,
+    depsgraph,
+    frames,
+    poses,
+    *,
+    tolerance: float = 1e-4,
+    samples: int = 5,
+) -> bool:
+    """True when the analytic poses match the dependency graph on sampled frames.
+
+    Cheap insurance: a handful of depsgraph evaluations instead of one per frame.
+    Any mismatch (a property we did not model) sends the caller back to the slow,
+    always-correct path.
+    """
+    if scene is None or depsgraph is None or not frames:
+        return False
+    count = max(1, min(int(samples), len(frames)))
+    if count == 1:
+        picks = [0]
+    else:
+        picks = sorted({round(i * (len(frames) - 1) / (count - 1)) for i in range(count)})
+    for index in picks:
+        frame = frames[index]
+        try:
+            scene.frame_set(int(frame))
+            depsgraph.update()
+            reference = camera_object.evaluated_get(depsgraph).matrix_world
+        except Exception:
+            return False
+        candidate = poses[index][0]
+        for row in range(4):
+            for column in range(4):
+                if abs(float(reference[row][column]) - float(candidate[row][column])) > tolerance:
+                    return False
+    return True
+
+
 def sample_camera_trajectory(
     camera_object,
     *,
@@ -30,11 +278,16 @@ def sample_camera_trajectory(
     depsgraph=None,
     mode: str = "all_frames",
 ) -> "list[TrajectoryRow]":
-    """Read the *evaluated* camera pose per frame and build trajectory rows.
+    """Read the camera pose per frame and build trajectory rows.
 
-    Poses are taken from the dependency graph rather than from ``object.location``
-    so that drivers, constraints and parented cameras are all honoured -- and so
-    the exported trajectory is by construction the same camera the renderer used.
+    Poses normally come from the dependency graph rather than from
+    ``object.location`` so that drivers, constraints and parented cameras are all
+    honoured -- and so the exported trajectory is by construction the same camera
+    the renderer used.  ``scene.frame_set()`` however re-evaluates the *whole*
+    scene, which on a heavy scene costs seconds per frame; when the camera is a
+    plain F-curve camera :func:`analytic_camera_poses` reproduces the same poses
+    without touching the graph, and :func:`verify_camera_poses` checks a few frames
+    against the graph before that shortcut is trusted.
     """
     import bpy
 
@@ -48,8 +301,28 @@ def sample_camera_trajectory(
         wanted.add(frames[-1])
         frames = [frame for frame in frames if frame in wanted]
 
-    rows: "list[TrajectoryRow]" = []
     lens_fallback = float(getattr(camera_object.data, "lens", 35.0))
+
+    poses = analytic_camera_poses(camera_object, frames)
+    if poses is not None and not verify_camera_poses(camera_object, scene, depsgraph,
+                                                     frames, poses):
+        poses = None
+    if poses is not None:
+        rows = []
+        for frame, (matrix, lens) in zip(frames, poses):
+            values = world_to_camera_row(matrix)
+            if not math.isfinite(lens) or lens <= 0:
+                lens = lens_fallback
+            rows.append(TrajectoryRow(
+                frame=int(frame),
+                focal_length=float(lens),
+                r00=values[0], r01=values[1], r02=values[2], tx=values[3],
+                r10=values[4], r11=values[5], r12=values[6], ty=values[7],
+                r20=values[8], r21=values[9], r22=values[10], tz=values[11],
+            ))
+        return rows
+
+    rows = []
     for frame in frames:
         scene.frame_set(frame)
         depsgraph.update()

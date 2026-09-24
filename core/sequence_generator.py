@@ -76,6 +76,7 @@ from ..utils.animation import set_interpolation
 from ..utils.task_control import TaskController
 from ..utils.version import GENERATOR_VERSION, generator_stamp
 from . import blender_context as bctx
+from . import focus as focus_objects
 from .camera_animation import PAYLOAD_KEY, build_payload, payload_summary, sample_to_dict
 from .scene_loader import SceneEntry, scene_name_for
 
@@ -83,6 +84,20 @@ from .scene_loader import SceneEntry, scene_name_for
 # --------------------------------------------------------------------------
 # small row-major 4x4 helpers (pure python: usable without ``bpy``, testable)
 # --------------------------------------------------------------------------
+
+#: How many keys the compact ``motion.keyframes`` summary keeps.
+MOTION_SUMMARY_KEYS = 13
+
+
+def _compact_keyframes(keyframes, limit: int = MOTION_SUMMARY_KEYS) -> "list[dict]":
+    """First/last plus evenly spaced keys: enough to eyeball a motion, not to replay it."""
+    rows = [kf.to_dict() for kf in keyframes]
+    if len(rows) <= limit:
+        return rows
+    step = (len(rows) - 1) / float(limit - 1)
+    picked = sorted({int(round(i * step)) for i in range(limit)})
+    return [rows[index] for index in picked]
+
 def _identity_4x4() -> "list[list[float]]":
     return [
         [1.0, 0.0, 0.0, 0.0],
@@ -185,6 +200,75 @@ def compound_parts(template) -> "list[str]":
     return names
 
 
+def _matrix_basis(matrix) -> "tuple[float, ...]":
+    """Row-major 3x3 of a 4x4 world matrix, i.e. the camera's own axes."""
+    return tuple(float(matrix[row][column]) for row in range(3) for column in range(3))
+
+
+def _region_line(info: dict) -> str:
+    """One log line saying whether the path stayed inside the box."""
+    return (
+        f"{info.get('mode', '?')}: {'inside' if info.get('ok') else 'OUTSIDE'} the box "
+        f"(stage {info.get('stage')}, {info.get('attempts', 0)} attempt(s), "
+        f"{info.get('exit_frames', 0)}/{info.get('frames', 0)} frame(s) out, "
+        f"worst excess {float(info.get('max_excess_m') or 0.0):.2f} m)"
+    )
+
+
+def _focus_block(result) -> dict:
+    """The part of the focus record a render node needs, or ``{}`` when there is none.
+
+    Numbers and names only, the same way the region block works: the renderer switches
+    the staged copy's focus objects on from ``objects`` alone, and a sequence *without*
+    a subject carries ``{}`` so it hides every focus object instead of leaving the
+    previous sequence's subject standing there.
+    """
+    record = getattr(result, "focus", None) or {}
+    placement = record.get("placement") or {}
+    objects = list(placement.get("objects") or [])
+    if not objects:
+        return {}
+    block = {
+        "object": record.get("object") or placement.get("id") or "",
+        "objects": objects,
+        "anchor": [float(v) for v in (placement.get("anchor") or [])],
+        "center": [float(v) for v in (placement.get("center") or [])],
+        "model_path": placement.get("model_path") or "",
+        "label": placement.get("label") or "",
+    }
+    visibility = record.get("visibility") or {}
+    if visibility:
+        block["visibility"] = {
+            "ok": bool(visibility.get("ok")),
+            "visible_ratio": visibility.get("visible_ratio"),
+            "visible_frames": visibility.get("visible_frames"),
+            "frames": visibility.get("frames"),
+        }
+    orbit = record.get("orbit") or {}
+    if orbit.get("ok"):
+        block["orbit"] = {
+            "radius_m": orbit.get("radius_m"),
+            "sweep_deg": orbit.get("sweep_deg"),
+            "direction": orbit.get("direction"),
+        }
+        # When the circle had to be replayed at another distance the record says so:
+        # ``radius_m`` alone cannot be read as "this is the distance the camera was at",
+        # because the room may not have allowed it.
+        if orbit.get("radius_natural_m") is not None:
+            block["orbit"]["radius_natural_m"] = orbit.get("radius_natural_m")
+        if orbit.get("radius_source"):
+            block["orbit"]["radius_source"] = orbit.get("radius_source")
+        attempts = orbit.get("radius_attempts") or []
+        if len(attempts) > 1:
+            block["orbit"]["radius_attempts"] = [
+                {"radius_m": item.get("radius_m"), "passed": bool(item.get("passed")),
+                 "inside_box": bool(item.get("inside_box")),
+                 "reasons": list(item.get("reasons") or [])}
+                for item in attempts
+            ]
+    return block
+
+
 @dataclass
 class SequenceRequest:
     """Everything that identifies one output sequence."""
@@ -203,6 +287,14 @@ class SequenceRequest:
     #: the segment layout, flattened into ``template`` once the camera's lens is
     #: known.  ``None`` for the classic "one template in, one sequence out" flow.
     plan: object | None = None
+    #: Camera-movement-region outcome for this shot, filled in once the camera's world
+    #: pose is known: the box that was used, whether the path stayed inside it and what
+    #: the re-draw cost.  Empty when the feature is off.
+    region: dict = field(default_factory=dict)
+    #: Id of the focus object this sequence belongs to (``""`` when the feature is off).
+    #: The object itself is already placed in the staged scene copy; the id is what
+    #: makes one sequence differ from the same shot with a different subject.
+    focus: str = ""
 
     @property
     def motion_folder(self) -> str:
@@ -247,6 +339,10 @@ class SequenceResult:
     elapsed_seconds: float = 0.0
     camera_used: str = ""
     character_status: str = ""
+    #: What the focus-object feature did for this sequence: the object, where it stands,
+    #: how the orbit was re-centred and how much of the shot it stayed in frame for.
+    #: Empty when the feature is off.
+    focus: dict = field(default_factory=dict)
 
     def to_manifest_entry(self) -> dict:
         from ..io.manifest import ManifestWriter  # noqa: F401  (typing only)
@@ -260,6 +356,7 @@ class SequenceResult:
             "character_name": self.request.character.id if self.request.character else "",
             "character_animation": getattr(self.request.animation, "id", "") or "",
             "character_status": self.character_status,
+            "focus_object": str(self.request.focus or ""),
             "source_blend": to_forward_slashes(self.request.scene_entry.path),
             "status": "ok" if self.ok else ("skipped" if self.skipped else "failed"),
             "error": self.error,
@@ -365,15 +462,16 @@ class SequenceGenerator:
         cameras: Sequence[str],
         character_variants: Sequence[tuple],
         start_index: int = 1,
+        focus_variants: Sequence = (),
     ) -> "list[SequenceRequest]":
-        """Expand the scene x motion x camera x character matrix.
+        """Expand the scene x motion x camera x character x focus-object matrix.
 
         Sequence numbers restart at 1 for **each motion folder**, so a
         ``scene/motion/`` directory is self-contained: its manifest, its
         sequence ids and its numbering all agree, and a partial re-run of one
         motion never renumbers another motion's sequences.
 
-        Two shapes are possible:
+        Three shapes are possible:
 
         * **Plan-driven** (``composite.enabled`` and an atomic document is
           loadable): every sequence is a :class:`MotionPlan` -- one atom for a
@@ -381,9 +479,18 @@ class SequenceGenerator:
           flattened into an ordinary template once the camera's lens is known.
         * **Classic**: every template in the library becomes one sequence, with the
           template's own frame range.
+        * Either of the above **times the focus objects**: ``focus_models`` adds one
+          axis, and the numbered folders of one motion keep counting across it, so a
+          motion folder holds ``motion x camera x character x focus`` sequences with
+          no per-object sub-folder.  Every sequence records which object it used.
         """
         scene_name = scene_name_for(scene_entry, self.config.batch.scene_name_mode)
         del start_index  # numbering is per motion folder, not global
+        variants = list(focus_variants or ())
+        if not variants:
+            variants = [(None, scene_entry)]
+        focus_ids = [str(getattr(model, "id", "")) if model is not None else ""
+                     for model, _entry in variants]
         composite = getattr(self.config, "composite", None)
         if composite is not None and composite.enabled:
             atoms, atomic_source = load_atomic_library(
@@ -395,6 +502,7 @@ class SequenceGenerator:
                 return self._plan_requests(
                     scene_entry, scene_name, atoms, atomic_source,
                     cameras=cameras, character_variants=character_variants,
+                    focus_variants=variants,
                 )
             self.notes.append(
                 "composite is enabled but no atomic motions could be loaded; "
@@ -407,21 +515,23 @@ class SequenceGenerator:
         for template in list(library):
             motion_name = safe_filename(template.name, fallback="motion")
             index = 1
-            for camera_name in cameras:
-                for has_character, character, animation, note in character_variants:
-                    requests.append(SequenceRequest(
-                        scene_entry=scene_entry,
-                        scene_name=scene_name,
-                        motion_name=motion_name,
-                        template=template,
-                        camera_name=camera_name,
-                        has_character=bool(has_character),
-                        character=character,
-                        animation=animation,
-                        character_note=note,
-                        index=index,
-                    ))
-                    index += 1
+            for focus_id, variant_entry in zip(focus_ids, [item[1] for item in variants]):
+                for camera_name in cameras:
+                    for has_character, character, animation, note in character_variants:
+                        requests.append(SequenceRequest(
+                            scene_entry=variant_entry,
+                            scene_name=scene_name,
+                            motion_name=motion_name,
+                            template=template,
+                            camera_name=camera_name,
+                            has_character=bool(has_character),
+                            character=character,
+                            animation=animation,
+                            character_note=note,
+                            index=index,
+                            focus=focus_id,
+                        ))
+                        index += 1
         return requests
 
     def _plan_requests(
@@ -433,6 +543,7 @@ class SequenceGenerator:
         *,
         cameras: Sequence[str],
         character_variants: Sequence[tuple],
+        focus_variants: Sequence = (),
     ) -> "list[SequenceRequest]":
         """Build the plan-driven requests: single-atom shots and compounds.
 
@@ -442,8 +553,15 @@ class SequenceGenerator:
         """
         composite = self.config.composite
         fps = float(self.motion.unit_scale.fps)
+        self._atoms = list(atoms)
+        self._atomic_source = atomic_source
         requests: "list[SequenceRequest]" = []
         seed = int(composite.seed)
+        variants = list(focus_variants or ())
+        if not variants:
+            variants = [(None, scene_entry)]
+        focus_ids = [str(getattr(model, "id", "")) if model is not None else ""
+                     for model, _entry in variants]
 
         def plan_seed(kind: str, motion_name: str, camera_name: str, slot: int,
                       attempt: int = 0) -> int:
@@ -489,7 +607,10 @@ class SequenceGenerator:
             """
             slots = max(1, int(per_camera) or len(character_variants))
             index = 1
-            for camera_name in cameras:
+
+            def queue(focus_id: str, camera_name: str, variant_entry) -> None:
+                """Queue this camera's ``slots`` sequences for one focus object."""
+                nonlocal index
                 for slot in range(slots):
                     if character_variants:
                         has_character, character, animation, note = (
@@ -500,8 +621,11 @@ class SequenceGenerator:
                     # Purely random, but never a repeat: a compound is re-drawn (with
                     # the next sub-seed) while its plan collides with one this camera
                     # already has, so N sequences per camera are N *different* shots
-                    # instead of a walk through the combination list.
-                    drawn: "set[str]" = seen_plans.setdefault(camera_name, set())
+                    # instead of a walk through the combination list.  The key carries
+                    # the focus object so that the same draw is reused for every object:
+                    # the subject is then the only thing that differs between otherwise
+                    # identical sequences.
+                    drawn: "set[str]" = seen_plans.setdefault(f"{focus_id}|{camera_name}", set())
                     for attempt in range(8):
                         sequence_seed = plan_seed(kind, motion_name, camera_name, slot, attempt)
                         rng = random.Random(sequence_seed)
@@ -541,7 +665,7 @@ class SequenceGenerator:
                         if note_text not in self.notes:
                             self.notes.append(note_text)
                     requests.append(SequenceRequest(
-                        scene_entry=scene_entry,
+                        scene_entry=variant_entry,
                         scene_name=scene_name,
                         motion_name=motion_name,
                         template=None,
@@ -552,8 +676,13 @@ class SequenceGenerator:
                         character_note=note,
                         index=index,
                         plan=plan,
+                        focus=focus_id,
                     ))
                     index += 1
+
+            for focus_id, variant_entry in zip(focus_ids, [item[1] for item in variants]):
+                for camera_name in cameras:
+                    queue(focus_id, camera_name, variant_entry)
 
         if composite.want_base():
             for atom in atoms:
@@ -571,6 +700,272 @@ class SequenceGenerator:
                 "random" if composite.random else "fixed", composite.seed,
             )
         return requests
+
+    def _region_for_scene(self, scene):
+        """The camera-movement region for this scene (``None`` when the feature is off).
+
+        Resolved once per scene and cached: the box is a property of the *set*, not of one
+        shot, and re-fitting it per sequence would cost time and let two sequences of the
+        same scene disagree about where the camera may go.
+        """
+        section = getattr(self.config, "region", None)
+        if section is None or not section.enabled:
+            return None
+        # Imported here on purpose: ``core`` is imported by ``camera``, so a module-level
+        # import would close the cycle core.region -> core.__init__ -> sequence_generator.
+        from ..camera.region_source import region_spec_from_section
+        cache = getattr(self, "_region_cache", None)
+        if cache is None:
+            cache = self._region_cache = {}
+        key = str(getattr(scene, "name", "") or id(scene))
+        if key not in cache:
+            cache[key] = region_spec_from_section(section, scene=scene, logger=self.logger)
+        return cache[key]
+
+    @staticmethod
+    def _region_info(region, report, *, ok, stage, record, margin) -> dict:
+        """The ``region`` block written into ``sequence_config.json`` (plain numbers)."""
+        if region is None:
+            return {}
+        report = report or {}
+        clearance = report.get("min_clearance_m")
+        return {
+            "mode": str(getattr(region, "mode", "")),
+            "source": str(getattr(region, "source", "")),
+            "box": region.to_dict(),
+            "margin": float(margin),
+            "ok": bool(ok),
+            "stage": str(stage),
+            "attempts": int(record.get("attempts", 0) or 0),
+            "segment_redraws": int(record.get("segment_redraws", 0) or 0),
+            "plan_redraws": int(record.get("plan_redraws", 0) or 0),
+            "speed_preferred": int(record.get("speed_preferred", 0) or 0),
+            "split_rounds": int(record.get("split_rounds", 0) or 0),
+            "frames": int(report.get("frames", 0) or 0),
+            "exit_frames": int(report.get("exit_frames", 0) or 0),
+            "max_excess_m": round(float(report.get("max_excess_m") or 0.0), 6),
+            "min_clearance_m": None if clearance is None else round(float(clearance), 6),
+            "worst_frame": report.get("worst_frame"),
+        }
+
+    def _fit_template_to_region(self, template, region, base_matrix, camera, *,
+                                run_log=None, measure_only=False):
+        """Keep a *fixed template* inside the region by scaling its amplitude.
+
+        The counterpart of :meth:`_fit_plan_to_region` for the classic flow, where the
+        template is a whole shot rather than a plan of atoms: nothing is re-drawn or
+        re-ordered, the camera's offsets from its first frame are multiplied by one
+        factor and the shot plays out smaller -- "follow the template, but adjust the
+        amplitude to the size of the scene".  Angles and focal length are never scaled
+        (they cannot leave the scene), and a shot that already fits is returned
+        untouched with ``scale == 1.0``.
+
+        ``measure_only`` is for a re-centred focus orbit: its circle is centred on the
+        subject, so shrinking the offsets would slide the camera off it.  The path is
+        measured and reported, and ``region.strict`` decides whether to keep it.
+        """
+        from ..camera.motion_templates import axis_basis, vec_add, vec_scale
+        from ..core.region import (clearance_of, fit_translation_scale, region_report,
+                                   with_inset)
+
+        if region is None:
+            return template, {}
+        section = self.config.region
+        margin = float(getattr(section, "margin", 0.0) or 0.0)
+        # One box for the decision *and* for the record: the run's margin is part of
+        # the rule, so a record can never say "ok: false" next to "exit_frames: 0".
+        checked = with_inset(region, margin)
+        position = tuple(float(v) for v in camera.location)
+        basis = _matrix_basis(base_matrix)
+        generator = self._generator()
+        right, up, forward = axis_basis(base_matrix)
+        back = vec_scale(forward, -1.0)
+        offsets = []
+        for key in template.keyframes:
+            local = generator.local_offset(key.location)
+            offsets.append(vec_add(
+                vec_add(vec_scale(right, local[0]), vec_scale(up, local[1])),
+                vec_scale(back, local[2]),
+            ))
+
+        start_clearance = float(clearance_of(region, position))
+        if start_clearance < margin:
+            info = self._region_info(
+                region, region_report(checked, [position]), ok=False,
+                stage="start-outside", record={"attempts": 1}, margin=margin,
+            )
+            info["start_clearance_m"] = round(start_clearance, 6)
+            info["scale"] = 1.0
+            if run_log is not None:
+                run_log.log(
+                    "camera region: the camera starts "
+                    f"{abs(start_clearance):.2f} m outside the box, so no amount of "
+                    "scaling can help (move the box, or the camera)",
+                    level="WARNING",
+                )
+            return template, info
+
+        if measure_only:
+            scaled = [tuple(position[axis] + offset[axis] for axis in range(3))
+                      for offset in offsets]
+            report = region_report(checked, scaled)
+            info = self._region_info(
+                region, report, ok=int(report["exit_frames"]) == 0, stage="focus-orbit",
+                record={"attempts": 1}, margin=margin,
+            )
+            info["scale"] = 1.0
+            if int(report["exit_frames"]) and run_log is not None:
+                run_log.log(
+                    "camera region: this orbit leaves the box on "
+                    f"{report['exit_frames']} frame(s) (worst "
+                    f"{float(report['max_excess_m']):.2f} m).  An orbit's radius is the "
+                    "camera's distance to the focus object, so the amplitude is left "
+                    "alone -- move the camera closer, or widen the box",
+                    level="WARNING",
+                )
+            return template, info
+
+        fit = fit_translation_scale(region, position, offsets, margin=margin)
+        scale = float(fit.get("scale") or 0.0)
+        scaled = [tuple(position[axis] + scale * offset[axis] for axis in range(3))
+                  for offset in offsets]
+        # Measure against the box the fit had to respect, with the same tolerance it
+        # used for its own boundary: the two numbers in the record must agree, and a
+        # frame parked on the wall by the optimiser is not a frame outside the box.
+        report = region_report(checked, scaled,
+                               tolerance=float(fit.get("tolerance_m") or 0.0))
+        # The stage says what actually happened, so a reader can tell "this shot was
+        # already inside the box" from "this shot had to be shrunk to get inside it".
+        if not fit.get("ok"):
+            stage = "fit-failed"
+        elif scale >= 0.999999:
+            stage = "inside"
+        else:
+            stage = "fit"
+        info = self._region_info(region, report, ok=bool(fit.get("ok")), stage=stage,
+                                 record={"attempts": 1}, margin=margin)
+        info["scale"] = round(scale, 6)
+        if not fit.get("ok"):
+            info["reason"] = str(fit.get("reason") or "")
+            if run_log is not None:
+                run_log.log(f"camera region: {info['reason']}", level="WARNING")
+            return template, info
+        if scale >= 0.999999:
+            if run_log is not None:
+                run_log.log("camera region: the template already fits the box unchanged")
+            return template, info
+        if run_log is not None:
+            run_log.log(
+                f"camera region: scaled the template's amplitude to {scale * 100:.1f}% "
+                "so it stays inside the box (shape, timing, angles and focal unchanged)"
+            )
+        keyframes = [
+            type(key)(frame=key.frame,
+                      location=tuple(scale * float(value) for value in key.location),
+                      rotation=key.rotation, focal=key.focal)
+            for key in template.keyframes
+        ]
+        parameters = dict(getattr(template, "parameters", None) or {})
+        parameters["region_fit"] = {"scale": round(scale, 6), "margin": margin}
+        keyframes = [
+            type(key)(frame=key.frame,
+                      location=tuple(scale * float(value) for value in key.location),
+                      rotation=key.rotation, focal=key.focal)
+            for key in template.keyframes
+        ]
+        from dataclasses import replace
+
+        return replace(template, keyframes=keyframes, parameters=parameters), info
+
+    def _fit_plan_to_region(self, plan, region, base_matrix, camera, *, run_log=None):
+        """Keep a plan inside *region*: re-draw it, never bend an atom.
+
+        The camera path is evaluated analytically from the plan (no scene evaluation, no
+        baking), so trying a hundred candidates costs microseconds.  A compound shot is
+        re-drawn through the graded ladder; a single-atom shot has nothing to re-draw and
+        is only measured.  Returns the plan to use (the original when it already fits) and
+        the report to record.
+        """
+        if region is None:                    # feature off: the plan is used as drawn
+            return plan, {}
+        position = tuple(float(v) for v in camera.location)
+        basis = _matrix_basis(base_matrix)
+        focal = float(getattr(camera, "lens", 0.0) or 0.0)
+        section = self.config.region
+        margin = float(getattr(section, "margin", 0.0) or 0.0)
+        from ..camera.region_planner import (  # see _region_for_scene for the cycle
+            DEFAULT_LIMITS,
+            draw_feasible_plan,
+            plan_is_feasible,
+        )
+        from ..core.region import clearance_of
+        limits = tuple(int(v) for v in (getattr(section, "attempts", None) or DEFAULT_LIMITS))
+
+        # Where the camera *starts* cannot be re-drawn: if the box does not contain it, no
+        # plan can ever be feasible and burning the whole ladder would only hide that.
+        start_clearance = float(clearance_of(region, position))
+        if start_clearance < margin:
+            _ok, report = plan_is_feasible(plan, region, base_position=position,
+                                           base_basis=basis, base_focal=focal, margin=margin)
+            info = self._region_info(region, report, ok=False, stage="start-outside",
+                                     record={"attempts": 1}, margin=margin)
+            info["start_clearance_m"] = round(start_clearance, 6)
+            if run_log is not None:
+                run_log.log(
+                    "camera region: the camera starts "
+                    f"{abs(start_clearance):.2f} m outside the box, so no re-draw can help "
+                    "(move the box, or the camera)",
+                    level="WARNING",
+                )
+            return plan, info
+        composite = self.config.composite
+        atoms = list(getattr(self, "_atoms", []) or [])
+
+        if not atoms or not _is_compound_plan(plan):
+            ok, report = plan_is_feasible(plan, region, base_position=position,
+                                          base_basis=basis, base_focal=focal, margin=margin)
+            info = self._region_info(region, report, ok=ok, stage="single-atom",
+                                     record={}, margin=margin)
+        else:
+            # The plan the batch already drew is tested *first*: switching the region on
+            # must not silently re-roll shots that were fine, and it keeps the
+            # duplicate-avoidance fingerprint taken at request time meaningful.
+            already_ok, report = plan_is_feasible(
+                plan, region, base_position=position, base_basis=basis, base_focal=focal,
+                margin=margin,
+            )
+            if already_ok:
+                info = self._region_info(region, report, ok=True, stage="L0",
+                                         record={"attempts": 1}, margin=margin)
+            else:
+                def build_plan(seed, atoms):
+                    return plan_compound(
+                        atoms,
+                        duration_seconds=float(plan.duration_seconds),
+                        fps=float(plan.fps),
+                        max_simultaneous=int(composite.max_simultaneous),
+                        max_segments=int(composite.max_segments),
+                        randomize=bool(composite.random),
+                        rng=random.Random(int(seed)),
+                        seed=int(seed),
+                        frame_start=int(plan.frame_start),
+                        source=str(getattr(self, "_atomic_source", "") or plan.source),
+                    )
+
+                plan, record = draw_feasible_plan(
+                    build_plan, atoms, region=region, base_position=position, base_basis=basis,
+                    base_focal=focal, seed=int(getattr(plan, "seed", 0) or 0),
+                    max_simultaneous=int(composite.max_simultaneous), margin=margin,
+                    limits=limits, slower=atoms, logger=None,
+                )
+                info = self._region_info(region, record.get("report"), ok=bool(record.get("ok")),
+                                         stage=record.get("stage", "?"), record=record,
+                                         margin=margin)
+
+        if run_log is not None:
+            run_log.log(f"camera region: {_region_line(info)}",
+                        level="INFO" if info["ok"] else "WARNING")
+        return plan, info
 
     def generate(self, request: SequenceRequest) -> SequenceResult:
         """Generate (or skip) one sequence."""
@@ -660,7 +1055,34 @@ class SequenceGenerator:
         for problem in static_problems:
             run_log.log(f"camera static check: {problem}", level="WARNING")
 
+        # -------- 1b. focus object (the subject an Arc orbits) -----------
+        focus_placement: "focus_objects.FocusPlacement | None" = None
+        focus_visibility: dict = {}
+        keep_focus_visible = bool(getattr(self.config.focus, "keep_visible", True))
+        focus_visible_ratio = float(getattr(self.config.focus, "visible_ratio", 0.95))
+        if getattr(request, "focus", ""):
+            focus_placement = focus_objects.placement_for(scene, request.focus)
+            if focus_placement is None:
+                run_log.log(
+                    f"focus object {request.focus!r} is not registered in this scene; the "
+                    "sequence is generated with no subject in it",
+                    level="WARNING",
+                )
+            else:
+                focus_visibility = focus_objects.apply_visibility(
+                    scene, focus_placement.objects
+                )
+                run_log.log(
+                    f"focus object {focus_placement.id}: {len(focus_visibility.get('shown') or [])} "
+                    f"object(s) shown at "
+                    f"{[round(float(v), 3) for v in focus_placement.center]}"
+                )
+
         exclude = list(character_placement.imported_objects) if character_placement else []
+        if focus_placement is not None:
+            # The subject is what the shot is *of*: it must not count as an obstacle the
+            # camera has to keep clear of, or an Arc could never come near it.
+            exclude.extend(focus_placement.objects)
         context = bctx.build_scene_context(
             scene=scene,
             exclude_objects=exclude,
@@ -683,6 +1105,27 @@ class SequenceGenerator:
         # is the plan's -- the video duration, not a template's own span.
         plan = getattr(request, "plan", None)
         if plan is not None:
+            region = self._region_for_scene(scene)
+            if region is not None:
+                plan, request.region = self._fit_plan_to_region(
+                    plan, region, base_matrix, original, run_log=run_log,
+                )
+                request.plan = plan
+                if not request.region.get("ok") and bool(
+                    getattr(self.config.region, "strict", False)
+                ):
+                    # Strict mode: reject the shot instead of shipping a camera path that
+                    # leaves the box.  Nothing is written, so this is a skip, not a failure.
+                    result.ok = True
+                    result.skipped = True
+                    result.camera_used = request.camera_name
+                    run_log.log(
+                        "camera region: no plan fits the box and region.strict is on; "
+                        "the sequence was skipped",
+                        level="WARNING",
+                    )
+                    self._write_log(run_log, output_dir)
+                    return
             request.template = flatten_plan(plan, base_focal=original.lens)
             range_start, range_end = int(plan.frame_start), int(plan.frame_end)
             run_log.log(
@@ -693,6 +1136,183 @@ class SequenceGenerator:
         else:
             range_start = self.motion.frame_start if self.motion.frame_end is not None else None
             range_end = self.motion.frame_end
+
+        # -------- 3b. an Arc orbits the focus object ---------------------
+        # The camera's own distance to the subject is the shot the author framed, so it
+        # is tried first.  A room can be too small or too cluttered for it, though -- a
+        # 7 m circle inside a 5 m bedroom drives the camera through a wall -- and an arc
+        # that is *about* the subject is worth more than the exact distance it is filmed
+        # from.  The same circle is therefore replayed at the nearest distance the scene
+        # accepts, validated at each step, and the authored one is kept when it works.
+        focus_orbit: dict = {}
+        validator = None
+        if self.validation_config.enabled and context.ray_caster is not None:
+            validator = CameraValidator(context, self.validation_config, logger=self.logger)
+        if focus_placement is not None and plan is None and request.template is not None:
+            authored_template = request.template
+            authored_matrix = base_matrix
+
+            def orbit_at(radius):
+                """``(template, info, base matrix, base quaternion)`` at one radius."""
+                retargeted, orbit_info = focus_objects.orbit_template(
+                    authored_template,
+                    anchor=focus_placement.center,
+                    base_position=base_position,
+                    base_quaternion=base_quaternion,
+                    fps=float(self.motion.unit_scale.fps),
+                    rotation_order=str(self.motion.unit_scale.rotation_order or "XYZ"),
+                    radius=radius,
+                )
+                if not orbit_info.get("ok"):
+                    return retargeted, orbit_info, None, None
+                # Re-centring the circle is only half of it: the camera also has to look
+                # at the subject from the first frame, so the aim is folded into the base
+                # pose here (the same mechanism the camera search uses for its nudge).
+                adjust = tuple(orbit_info.get("rotation_adjust") or (1.0, 0.0, 0.0, 0.0))
+                matrix = _matmul(_matrix_from_pose((0.0, 0.0, 0.0), adjust),
+                                 [[float(v) for v in row] for row in authored_matrix])
+                # The camera keeps its position: a bare matrix product would rotate it
+                # about the world origin (the animation builder overwrites the
+                # translation for exactly this reason, and a candidate built without
+                # that correction is aimed at nothing -- measured: subject in frame
+                # 0/145 for a radius whose final sequence reports 145/145).
+                matrix[0][3] = float(base_position[0])
+                matrix[1][3] = float(base_position[1])
+                matrix[2][3] = float(base_position[2])
+                return (
+                    retargeted,
+                    orbit_info,
+                    matrix,
+                    quat_multiply(adjust, base_quaternion),
+                )
+
+            radius_attempts: "list[dict]" = []
+            box = self._region_for_scene(scene)
+            margin = float(getattr(self.config.region, "margin", 0.0) or 0.0)
+            chosen = orbit_at(None)
+            if chosen[1].get("ok"):
+                natural = float(chosen[1].get("radius_natural_m")
+                                or chosen[1].get("radius_m") or 0.0)
+                radii = focus_objects.orbit_radius_candidates(
+                    natural, minimum=float(focus_objects.MIN_ORBIT_RADIUS)) or [round(natural, 6)]
+                for index, radius in enumerate(radii):
+                    if index == 0:
+                        template_i, info_i, matrix_i, quaternion_i = chosen
+                    else:
+                        template_i, info_i, matrix_i, quaternion_i = orbit_at(radius)
+                        if not info_i.get("ok"):
+                            continue
+                    if validator is None:
+                        chosen = (template_i, info_i, matrix_i, quaternion_i)
+                        break
+                    candidate = generator.generate(
+                        template_i, base_matrix=matrix_i, base_focal=original.lens,
+                        base_quaternion=quaternion_i, frame_start=range_start,
+                        frame_end=range_end,
+                    )
+                    inside_box = True
+                    if box is not None:
+                        from ..core.region import region_report, with_inset
+                        inside_box = int(region_report(
+                            with_inset(box, margin),
+                            [sample.position for sample in candidate.samples],
+                        )["exit_frames"]) == 0
+                    candidate_report = validator.validate(
+                        original, candidate, character=character_box,
+                        base_matrix=matrix_i, base_focal=original.lens,
+                    )
+                    visible = True
+                    seen = None
+                    if keep_focus_visible:
+                        seen = focus_objects.visibility_report(
+                            candidate, focus_placement, original,
+                            threshold=focus_visible_ratio,
+                        )
+                        visible = bool(seen.get("ok"))
+                    radius_attempts.append({
+                        "radius_m": round(float(radius), 4),
+                        "passed": bool(candidate_report.passed and visible and inside_box),
+                        "subject_visible": bool(visible),
+                        "inside_box": bool(inside_box),
+                        "reasons": list(candidate_report.failures),
+                    })
+                    run_log.log(
+                        f"focus orbit: radius {radius:.2f} m -- validation "
+                        + ("passed" if candidate_report.passed
+                           else "failed: " + ", ".join(candidate_report.failures))
+                        + (f", subject in frame {seen['visible_frames']}/{seen['frames']}"
+                           if seen else "")
+                        + (", inside the box" if inside_box else ", outside the box")
+                    )
+                    if candidate_report.passed and visible and inside_box:
+                        chosen = (template_i, info_i, matrix_i, quaternion_i)
+                        if index:
+                            run_log.log(
+                                f"focus orbit: the authored {natural:.2f} m distance does "
+                                f"not survive the scene; using {radius:.2f} m instead"
+                            )
+                        break
+                else:
+                    run_log.log(
+                        "focus orbit: no distance around the subject passes validation; "
+                        "keeping the authored one and recording the failure",
+                        level="WARNING",
+                    )
+
+            if chosen[1].get("ok"):
+                # Re-centring the circle is only half of it: the camera also has to look
+                # at the subject from the first frame, so the aim is folded into the base
+                # pose here (the same mechanism the camera search uses for its nudge).
+                request.template = chosen[0]
+                base_matrix = chosen[2]
+                base_quaternion = chosen[3]
+                focus_orbit = dict(chosen[1])
+                if len(radius_attempts) > 1:
+                    focus_orbit["radius_attempts"] = radius_attempts
+                run_log.log(
+                    f"focus orbit: {focus_orbit['direction']} "
+                    f"{float(focus_orbit['sweep_deg']):.1f} deg around {focus_placement.id!r} "
+                    f"at {float(focus_orbit['radius_m']):.2f} m "
+                    f"({focus_orbit.get('keys', 0)} keys; the camera was aimed "
+                    f"{float(focus_orbit['base_aim_deg']):.1f} deg off its authored orientation)"
+                )
+            else:
+                focus_orbit = dict(chosen[1])
+                run_log.log(
+                    f"focus object {focus_placement.id!r} does not change this motion: "
+                    f"{focus_orbit.get('reason') or 'not an orbit'}",
+                    level="WARNING" if focus_orbit.get("reason") else "INFO",
+                )
+
+        # -------- 3c. keep a fixed template inside the scene ------------
+        # A template is a whole shot, so the region is honoured here by *scaling* its
+        # amplitude -- never by re-drawing it, which is what the atomic ladder does.
+        # The path keeps its shape, its timing and its angles and plays out smaller;
+        # rotation-only and zoom-only shots cannot leave the scene and are untouched.
+        # A re-centred focus orbit is the exception: its circle is centred on the
+        # subject, so scaling would slide the camera off the subject.  There the box is
+        # *measured* instead, and `region.strict` decides what to do about it.
+        if plan is None and request.template is not None:
+            region = self._region_for_scene(scene)
+            if region is not None:
+                request.template, request.region = self._fit_template_to_region(
+                    request.template, region, base_matrix, original, run_log=run_log,
+                    measure_only=bool(focus_orbit.get("ok")),
+                )
+                info = request.region or {}
+                if info and not info.get("ok") and bool(
+                    getattr(self.config.region, "strict", False)
+                ):
+                    result.ok = True
+                    result.skipped = True
+                    result.camera_used = request.camera_name
+                    run_log.log(
+                        "camera region: the template cannot be made to fit and "
+                        "region.strict is on; the sequence was skipped",
+                        level="WARNING",
+                    )
+                    self._write_log(run_log, output_dir)
+                    return
 
         def make_animation_for(position, quaternion=None, rotation_adjust=None):
             """Animation anchored at ``position``, in the frame ``rotation_adjust`` gives.
@@ -753,6 +1373,27 @@ class SequenceGenerator:
                 def make_animation(candidate):
                     return make_animation_for(candidate.position, rotation_adjust=candidate.rotation_adjust)
 
+                def subject_veto(candidate, candidate_animation):
+                    """Keep the focus object in frame when the search moves the camera.
+
+                    An Arc is *about* its subject: a candidate that fixes a grazing
+                    wall by turning away from the subject would replace one bad shot
+                    with a worse one, so it is refused and the original pose (and its
+                    recorded failure) stands instead.
+                    """
+                    if focus_placement is None or not keep_focus_visible:
+                        return None
+                    check = focus_objects.visibility_report(
+                        candidate_animation, focus_placement, original,
+                        threshold=focus_visible_ratio, step=4,
+                    )
+                    if check.get("ok"):
+                        return None
+                    return (
+                        f"focus_object_lost: {check['visible_frames']}/{check['frames']} "
+                        f"frame(s) show {focus_placement.id!r}"
+                    )
+
                 search_result = search.search(
                     original,
                     make_animation,
@@ -762,6 +1403,12 @@ class SequenceGenerator:
                     character=character_box,
                     base_matrix=base_matrix,
                     original_report=report,
+                    # Only an Arc is *about* the subject: in every other motion the focus
+                    # object merely exists in the scene ("the object only exists, it does
+                    # not take part"), so a search there must not be held to keeping it in
+                    # frame -- that would fail shots the user never asked to be of it.
+                    veto=subject_veto if (focus_placement is not None
+                                          and focus_orbit.get("ok")) else None,
                 )
                 for message in search_result.messages:
                     run_log.log(f"  search: {message}")
@@ -778,6 +1425,13 @@ class SequenceGenerator:
                         report = best.report
                     run_log.log(f"camera search accepted: {winner.describe()}")
                 else:
+                    vetoed = sum(1 for e in search_result.evaluations if e.rejected_reason)
+                    if vetoed:
+                        run_log.log(
+                            f"camera search: {vetoed} candidate(s) passed the geometry checks "
+                            "but lost the focus object and were refused",
+                            level="WARNING",
+                        )
                     run_log.log(
                         "camera search found no acceptable candidate; recording the failure "
                         "instead of emitting a knowingly bad sequence",
@@ -816,6 +1470,49 @@ class SequenceGenerator:
             )
         else:
             run_log.log("geometry validation disabled by configuration")
+
+        # -------- 3c. did the subject stay in frame? ---------------------
+        focus_record: dict = {}
+        if focus_placement is not None:
+            focus_record = {
+                "object": focus_placement.id,
+                "placement": focus_placement.to_dict(),
+                "orbit": dict(focus_orbit or {}),
+                "shown": list(focus_visibility.get("shown") or []),
+            }
+            if bool(getattr(self.config.focus, "keep_visible", True)):
+                visibility = focus_objects.visibility_report(
+                    animation, focus_placement, original,
+                    threshold=float(getattr(self.config.focus, "visible_ratio", 0.95)),
+                )
+                focus_record["visibility"] = visibility
+                run_log.log(
+                    f"focus object {focus_placement.id!r}: in frame for "
+                    f"{visibility['visible_frames']}/{visibility['frames']} frame(s) "
+                    f"({float(visibility['visible_ratio']) * 100:.1f}%), nearest approach "
+                    f"{float(visibility['min_distance_m']):.2f} m"
+                )
+                if not visibility["ok"] and focus_orbit.get("ok"):
+                    reason = (
+                        f"the focus object {focus_placement.id!r} is out of frame: "
+                        f"{visibility['visible_frames']}/{visibility['frames']} frame(s) "
+                        f"visible, needing "
+                        f"{float(visibility['threshold']) * 100:.0f}%"
+                    )
+                    run_log.log(reason, level="WARNING")
+                    if bool(getattr(self.config.focus, "strict", False)):
+                        # Same contract as region.strict: a shot whose subject is not in
+                        # frame is not written at all, and that is a skip, not a failure.
+                        result.ok = True
+                        result.skipped = True
+                        result.camera_used = request.camera_name
+                        result.focus = focus_record
+                        run_log.log("focus.strict is on; the sequence was skipped",
+                                    level="WARNING")
+                        self._write_log(run_log, output_dir)
+                        return
+                    focus_record["message"] = reason
+        result.focus = focus_record
 
         result.validation = report
         result.search = search_result
@@ -1248,6 +1945,7 @@ class SequenceGenerator:
                 "scene_frame_range": [int(scene.frame_start), int(scene.frame_end)],
                 "camera_data_block": getattr(getattr(bpy.data.objects.get(camera.name), "data", None), "name", ""),
                 "character_placement": character_placement.to_dict() if character_placement else None,
+                "focus": dict(getattr(result, "focus", None) or {}) or None,
                 **generator_stamp(),
             },
         )
@@ -1306,7 +2004,12 @@ class SequenceGenerator:
         files["sequence_config"] = save_json_file(config_path, config_payload)
 
         # -- validation report ----------------------------------------------
-        if self.config.batch.save_validation_report:
+        # Only worth shipping when something went wrong (or when the run was asked
+        # to keep everything): a 30 KB report per successful sequence is 10% of the
+        # package and tells nobody anything.
+        keep_reports = bool(getattr(self.config.batch, "keep_reports", False))
+        sequence_failed = report is not None and not report.passed
+        if self.config.batch.save_validation_report and (keep_reports or sequence_failed):
             report_path = os.path.join(output_dir, "validation_report.json")
             files["validation_report"] = save_json_file(report_path, {
                 "sequence_id": sequence_id,
@@ -1340,7 +2043,8 @@ class SequenceGenerator:
         files["manifest"] = writer.path
 
         # -- log -------------------------------------------------------------
-        files["generation_log"] = self._write_log(run_log, output_dir)
+        if keep_reports or sequence_failed:
+            files["generation_log"] = self._write_log(run_log, output_dir)
         return files
 
     def _sequence_config_payload(self, request, camera, animation, result, report) -> dict:
@@ -1372,12 +2076,22 @@ class SequenceGenerator:
                     "focal_length_mm": round(float(animation.samples[0].focal), 6),
                 },
             },
+            "focus": _focus_block(result),
             "motion": {
                 "template_name": animation.template_name,
                 "template_source": request.template.source,
                 "interpolation": animation.interpolation,
                 "parameters": dict(animation.template_parameters),
-                "keyframes": [kf.to_dict() for kf in request.template.keyframes],
+                # A baked per-frame motion is 216 keys (~20 KB) and made up 84% of
+                # this file; the renderer never reads it (it replays the payload
+                # below), and the full list is reproducible from template_name +
+                # parameters (or from motion_plan).  Keep a compact summary only.
+                "keyframes": _compact_keyframes(request.template.keyframes),
+                "keyframe_count": len(request.template.keyframes),
+                "keyframes_note": (
+                    "summary only -- rebuild the full list from template_name + "
+                    "parameters, or from motion_plan for compound sequences"
+                ),
                 "unit_scale": dict(animation.unit_scale),
             },
             "render": {
@@ -1395,6 +2109,7 @@ class SequenceGenerator:
                 "score": round(float(report.score), 6) if report else None,
                 "reasons": report.failures if report else [],
             },
+            "region": dict(getattr(request, "region", None) or {}),
             "generator_version": GENERATOR_VERSION,
             "created_utc": utc_now_iso(),
         }

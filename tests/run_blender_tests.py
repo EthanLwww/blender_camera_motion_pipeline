@@ -37,10 +37,14 @@ SUITES = (
     ("test_project_layout", "pure"),
     ("test_motion_templates", "pure"),
     ("test_motion_composite", "pure"),
+    ("test_region", "pure"),
+    ("test_region_planner", "pure"),
+    ("test_region_wiring", "pure"),
     ("test_camera_validation", "pure"),
     ("test_animation_api", "blender"),
     ("test_addon_lifecycle", "blender"),
     ("test_render_workflow", "blender"),
+    ("test_focus_objects", "blender"),
     ("test_blender_integration", "blender"),
 )
 

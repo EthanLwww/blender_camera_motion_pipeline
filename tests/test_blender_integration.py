@@ -309,6 +309,7 @@ def generate_for(blend: str, output_root: str, **kwargs):
 
     entry = SceneEntry(path=blend)
     config = make_config(output_root, **kwargs)
+    config.batch.keep_reports = True
     runner = BatchRunner(config, output_root=output_root, scene_entries=[entry])
     report = runner.run()
     return report, report.scenes[0] if report.scenes else None
@@ -725,6 +726,56 @@ def build_suite() -> Suite:
         packed = [img for img in bpy.data.images if img.packed_file is not None]
         ok(packed, "the texture must live inside the .blend after packing")
 
+    @suite.case("generating a project packs the scene copy, so the folder carries its assets")
+    def _():
+        # The project folder is what gets uploaded: a scene that still points at
+        # ``D:\Materiales\...`` renders with Blender's fallback for that file, silently
+        # and once per frame.  Staging therefore packs the copy before generation runs,
+        # and reports whatever could not be packed.
+        import bpy
+
+        from blender_motion_pipeline.core.batch_runner import BatchRunner
+        from blender_motion_pipeline.core.project import PACK_REPORT, ProjectLayout
+
+        source = build_scene_blend(os.path.join(WORK, "packed_source.blend"))
+        texture_path = os.path.join(WORK, "project_asset.png")
+        image = bpy.data.images.new("project_asset", 4, 4)
+        image.filepath_raw = texture_path
+        image.file_format = "PNG"
+        image.save()
+        material = bpy.data.materials.new("project_asset")
+        material.use_nodes = True
+        node = material.node_tree.nodes.new("ShaderNodeTexImage")
+        node.image = image
+        first = bpy.data.objects[0]
+        first.data.materials.append(material)
+        bpy.ops.wm.save_as_mainfile(filepath=source, check_existing=False, compress=False)
+
+        project_root = os.path.join(WORK, "packed_project")
+        layout = ProjectLayout.create(project_root, package_root=_PACKAGE_ROOT)
+        config = make_config(project_root, names=["still"], validation=False, search=False)
+        report = BatchRunner(config, output_root=project_root,
+                             scene_entries=[SceneEntry(path=source)],
+                             project_layout=layout).run()
+        ok(report.ok, report.summary_text())
+
+        copies = [name for name in os.listdir(layout.scene_root) if name.endswith(".blend")]
+        equal(len(copies), 1, "only the scene copy lives in scene/")
+        copy = os.path.join(layout.scene_root, copies[0])
+        ok(os.path.isfile(os.path.join(layout.root, PACK_REPORT)),
+           "the pack report must land in the project root, not in scene/")
+        manifest = load_json_file(os.path.join(layout.root, "project.json"))
+        pack = manifest.get("asset_pack") or {}
+        equal(pack.get("scenes"), 1, pack)
+        ok(pack.get("packed_files", 0) >= 1, pack)
+        equal(pack.get("missing_files"), 0, pack)
+
+        # Deleting the source texture must not matter any more.
+        os.remove(texture_path)
+        bpy.ops.wm.open_mainfile(filepath=copy, load_ui=False)
+        ok([img for img in bpy.data.images if img.packed_file is not None],
+           "the staged copy must carry the texture inside the .blend")
+
     # -- templates -------------------------------------------------------
     @suite.case("missing and malformed template JSON are reported clearly")
     def _():
@@ -778,7 +829,8 @@ def build_suite() -> Suite:
         for motion in ("still", "push_in"):
             directory = os.path.join(base, motion, "sequence_000001")
             for name in ("sequence_config.json", "sequence_000001.json",
-                         "sequence_000001_camera.txt", "validation_report.json", "generation_log.txt"):
+                         "sequence_000001_camera.txt", "generation_log.txt",
+                           "validation_report.json"):
                 ok(os.path.isfile(os.path.join(directory, name)), os.path.join(directory, name))
             # Animation-only: the sequence carries no scene copy of its own.
             ok(not [n for n in os.listdir(directory) if n.endswith(".blend")],
@@ -789,7 +841,8 @@ def build_suite() -> Suite:
             manifest = os.path.join(base, motion, "manifest.json")
             ok(os.path.isfile(manifest), manifest)
         ok(os.path.isfile(os.path.join(OUT_DIR, "basic", "manifest.json")), "root manifest")
-        ok(os.path.isfile(os.path.join(OUT_DIR, "basic", "batch_report.json")), "batch report")
+        ok(os.path.isfile(os.path.join(OUT_DIR, "basic", "batch_report.json")),
+             "keep_reports must also keep batch_report.json")
 
     @suite.case("every generated sequence matches its template's Blender numbers")
     def _():
@@ -2593,6 +2646,104 @@ def build_suite() -> Suite:
             ok("FINISHED" in result, result)
         finally:
             registration.unregister_all()
+
+    @suite.case("an enabled camera region is baked into every sequence config")
+    def _():
+        # A render node must be able to read where the camera was allowed to go without
+        # the helper object or the source scene, so the box and the verdict are written
+        # as plain numbers -- and an accepted shot is one that really stays inside.
+        from blender_motion_pipeline.core.batch_runner import BatchRunner
+
+        def sequence_folders(root: str) -> "list[str]":
+            found = []
+            for current, _dirs, files in os.walk(root):
+                if "sequence_config.json" in files:
+                    found.append(current)
+            return sorted(found)
+
+        def compound_config(root: str):
+            config = make_config(root, names=["still"])
+            config.composite.enabled = True
+            config.composite.template_path = write_atomic_templates()
+            config.composite.output_mode = "only_compound"
+            config.composite.sequences_per_camera = 2
+            config.composite.max_segments = 2
+            config.composite.duration = 4.0
+            config.validation.enabled = False
+            return config
+
+        root = os.path.join(OUT_DIR, "region")
+        config = compound_config(root)
+        # The box has to contain where the camera *starts*: a re-draw can shorten a path
+        # but never move its first frame, so the test centres the box on the fixture
+        # camera exactly the way a user would.
+        from blender_motion_pipeline.core.scene_loader import load_blend_file
+
+        load_blend_file(state["single"])
+        import bpy
+
+        base = bpy.context.scene.camera.matrix_world.translation
+        config.region.mode = "numbers"
+        config.region.center = [float(base[0]), float(base[1]), float(base[2])]
+        config.region.size = [2.0, 2.0, 2.0]
+        config.region.margin = 0.0
+        report = BatchRunner(
+            config, output_root=root, scene_entries=[SceneEntry(path=state["single"])]
+        ).run()
+        ok(report.ok, report.summary_text())
+
+        folders = sequence_folders(root)
+        ok(folders, "the run must write at least one sequence")
+        for folder in folders:
+            recorded = load_json_file(os.path.join(folder, "sequence_config.json"))
+            block = recorded.get("region") or {}
+            ok(block, f"{os.path.basename(folder)} has no region block")
+            equal(block["mode"], "numbers")
+            equal(block["box"]["half_size"], [1.0, 1.0, 1.0])
+            equal(block["ok"], True, block)
+            equal(block["exit_frames"], 0, block)
+            # Plan-driven shots go through the re-draw ladder (L0..L4); a fixed
+            # template is never re-drawn, so it reports "inside" when it already fits,
+            # "fit" when its amplitude had to be scaled to get inside the box, and
+            # "focus-orbit" when it is a re-centred orbit that is only measured.
+            ok(block["stage"] in ("L0", "L1", "L2", "L3", "L4", "single-atom",
+                                  "inside", "fit", "focus-orbit"), block["stage"])
+            # Numbers only: nothing here needs the scene that produced it.
+            equal(len(block["box"]["basis"]), 9)
+            ok(isinstance(block["max_excess_m"], float), block["max_excess_m"])
+
+        # Auto mode: the box is fitted to the scene's own objects, which is the option a
+        # user reaches for first.  Only the recording is asserted here -- whether that box
+        # also holds the camera is exactly what the report says.
+        auto_root = os.path.join(OUT_DIR, "region_auto")
+        auto = compound_config(auto_root)
+        auto.region.mode = "auto"
+        auto.region.margin_percent = 25.0
+        BatchRunner(
+            auto, output_root=auto_root, scene_entries=[SceneEntry(path=state["single"])]
+        ).run()
+        auto_folders = sequence_folders(auto_root)
+        ok(auto_folders, "the auto run must write sequences")
+        for folder in auto_folders:
+            recorded = load_json_file(os.path.join(folder, "sequence_config.json"))
+            block = recorded.get("region") or {}
+            equal(block.get("mode"), "auto")
+            equal(block.get("source"), "auto")
+            ok(block["box"]["half_size"][0] > 0.0, block)
+            ok("ok" in block, block)
+
+        # With the region off, no sequence carries a region block at all: the feature
+        # is invisible to everybody who does not switch it on.
+        plain_root = os.path.join(OUT_DIR, "region_off")
+        plain = compound_config(plain_root)
+        BatchRunner(
+            plain, output_root=plain_root, scene_entries=[SceneEntry(path=state["single"])]
+        ).run()
+        plain_folders = sequence_folders(plain_root)
+        ok(plain_folders, "the control run must write sequences too")
+        for folder in plain_folders:
+            recorded = load_json_file(os.path.join(folder, "sequence_config.json"))
+            equal(recorded.get("region"), {})
 
     return suite
 

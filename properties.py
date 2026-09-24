@@ -19,7 +19,9 @@ from bpy.props import (
     CollectionProperty,
     EnumProperty,
     FloatProperty,
+    FloatVectorProperty,
     IntProperty,
+    IntVectorProperty,
     StringProperty,
 )
 from bpy.types import PropertyGroup
@@ -187,6 +189,47 @@ class MPP_SceneListItem(PropertyGroup):
         return os.path.dirname(self.path) if self.path else ""
 
 
+class MPP_FocusItem(PropertyGroup):
+    """One ``.blend`` model used as a focus object (the subject an Arc orbits)."""
+
+    path: StringProperty(
+        name="Path",
+        description="Absolute path to the .blend file holding the model",
+        default="",
+        subtype="FILE_PATH",
+    )
+    enabled: BoolProperty(name="Enabled", default=True)
+    name: StringProperty(
+        name="Name",
+        description="Label used in metadata (and to tell two models apart); "
+                    "defaults to the file name",
+        default="",
+    )
+    object_name: StringProperty(
+        name="Object",
+        description="Take only this object out of the file (empty: take the file)",
+        default="",
+    )
+    scale: FloatProperty(
+        name="Scale",
+        description="Uniform scale applied to the model",
+        default=1.0, min=0.001, max=1000.0,
+    )
+    rotation: FloatVectorProperty(
+        name="Rotation",
+        description="Model orientation, XYZ degrees",
+        size=3, default=(0.0, 0.0, 0.0), subtype="EULER", unit="ROTATION",
+    )
+    status: EnumProperty(name="Status", items=SCENE_STATUS_ITEMS, default="pending")
+    note: StringProperty(name="Note", default="")
+
+    def label(self) -> str:
+        return self.name or os.path.basename(self.path) or "(unnamed)"
+
+    def directory(self) -> str:
+        return os.path.dirname(self.path) if self.path else ""
+
+
 class MPP_SceneProperties(PropertyGroup):
     """Everything the Motion Pipeline panel edits."""
 
@@ -338,6 +381,14 @@ class MPP_SceneProperties(PropertyGroup):
         name="Check character overlap",
         description="Reject placements where the character is inside scene geometry",
         default=True,
+    )
+    keep_reports: BoolProperty(
+        name="Keep reports",
+        description=(
+            "Keep validation_report.json, generation_log.txt and batch_report.json "
+            "even when every sequence succeeded (they are always kept for failures)"
+        ),
+        default=False,
     )
     save_validation_report: BoolProperty(
         name="Save validation report",
@@ -591,6 +642,145 @@ class MPP_SceneProperties(PropertyGroup):
         default="with_base",
     )
 
+    # -- camera movement region -------------------------------------------
+    region_mode: EnumProperty(
+        name="Camera region",
+        description="Where the camera is allowed to travel while a shot plays",
+        items=(
+            ("off", "No region", "The camera may go anywhere (the default)"),
+            ("auto", "Auto from scene",
+             "Fit a box around the scene's own objects, ignoring scattered debris"),
+            ("object", "From object", "Use one object's box, rotation included"),
+            ("numbers", "Numbers", "Use the centre/size/rotation typed below"),
+        ),
+        default="off",
+    )
+    region_object: StringProperty(
+        name="Region object",
+        description="Object whose box defines the region (mode 'From object')",
+        default="",
+    )
+    region_use_selected: BoolProperty(
+        name="Use selected",
+        description="Take the region object from the active object in the viewport",
+        default=False,
+    )
+    region_center: FloatVectorProperty(
+        name="Centre",
+        description="Centre of the allowed box, in world metres",
+        size=3, default=(0.0, 0.0, 0.0), subtype="TRANSLATION", unit="LENGTH",
+    )
+    region_size: FloatVectorProperty(
+        name="Size",
+        description="Full size of the allowed box (X, Y, Z) in metres",
+        size=3, default=(8.0, 8.0, 4.0), subtype="TRANSLATION", unit="LENGTH",
+    )
+    region_rotation: FloatVectorProperty(
+        name="Rotation",
+        description="Orientation of the box, XYZ degrees",
+        size=3, default=(0.0, 0.0, 0.0), subtype="EULER", unit="ROTATION",
+    )
+    region_margin_percent: FloatProperty(
+        name="Auto margin %",
+        description="Extra room kept around what 'Auto from scene' detects",
+        default=25.0, min=0.0, max=500.0,
+    )
+    region_inset: FloatProperty(
+        name="Inset",
+        description="Shrink the usable box by this many metres",
+        default=0.0, min=0.0, max=1000.0, unit="LENGTH",
+    )
+    region_helper: StringProperty(
+        name="Helper object",
+        description="Helper box used to draw the region by hand; it is never rendered",
+        default="",
+    )
+    region_margin: FloatProperty(
+        name="Safety margin",
+        description="How much room a path must leave to be accepted, in metres",
+        default=0.25, min=0.0, max=1000.0, unit="LENGTH",
+    )
+    region_attempts: IntVectorProperty(
+        name="Re-draw attempts",
+        description="Tries per stage: segment redraw, plan redraw, slower atoms, splits",
+        size=4, default=(8, 8, 4, 3), min=0, max=64,
+    )
+    region_strict: BoolProperty(
+        name="Skip shots that cannot fit",
+        description="Do not write a sequence whose camera path leaves the box",
+        default=False,
+    )
+
+    # -- focus objects ----------------------------------------------------
+    focus_mode: EnumProperty(
+        name="Focus objects",
+        description="Subjects to place in the scene and generate sequences for",
+        items=(
+            ("off", "No focus objects", "Generate the scene x camera x motion matrix only"),
+            ("models", "One per model",
+             "Place every enabled model on the anchor and add it as an axis of the matrix"),
+        ),
+        default="off",
+    )
+    focus_list: CollectionProperty(type=MPP_FocusItem)
+    focus_list_index: IntProperty(name="Selected focus model", default=-1, min=-1)
+    #: Deliberately a plain string, not FILE_PATH: RNA validates a FILE_PATH subtype
+    #: before the operator ever runs, which would reject a path the operator could
+    #: have fixed up (and it cannot hold a path that does not exist yet).
+    focus_file: StringProperty(
+        name="Model file",
+        description="Pick a .blend model, then press Add model",
+        default="",
+    )
+    focus_directory: StringProperty(
+        name="Model folder",
+        description="Folder to scan for .blend models",
+        default="",
+        subtype="DIR_PATH",
+    )
+    focus_anchor_mode: EnumProperty(
+        name="Anchor",
+        description="Where the single anchor point of a scene comes from",
+        items=(
+            ("auto", "Auto (open spot)",
+             "Find the middle of the open part of the scene when the scene is opened"),
+            ("object", "From object",
+             "Use the object named below, moved by hand or with Auto place anchor"),
+            ("numbers", "Numbers", "Use the coordinates typed below"),
+        ),
+        default="auto",
+    )
+    focus_anchor_object: StringProperty(
+        name="Anchor object",
+        description="Empty that marks the anchor point (mode 'From object')",
+        default="MPP_FocusAnchor",
+    )
+    focus_anchor_location: FloatVectorProperty(
+        name="Anchor location",
+        description="Anchor point in world metres (mode 'Numbers')",
+        size=3, default=(0.0, 0.0, 0.0), subtype="TRANSLATION", unit="LENGTH",
+    )
+    focus_anchor_clearance: FloatProperty(
+        name="Anchor clearance",
+        description="Free space 'Auto (open spot)' looks for around the anchor, in metres",
+        default=0.5, min=0.0, max=100.0, unit="LENGTH",
+    )
+    focus_keep_visible: BoolProperty(
+        name="Keep the subject in frame",
+        description="Check every sequence that the focus object really stayed visible",
+        default=True,
+    )
+    focus_visible_ratio: FloatProperty(
+        name="Required visibility",
+        description="Share of the frames the focus object has to be in frame for",
+        default=0.95, min=0.0, max=1.0, subtype="FACTOR",
+    )
+    focus_strict: BoolProperty(
+        name="Skip shots that lose the subject",
+        description="Do not write a sequence whose focus object ends up out of frame",
+        default=False,
+    )
+
     # -- local rendering --------------------------------------------------
     render_list: CollectionProperty(type=MPP_RenderItem)
     render_list_index: IntProperty(name="Selected sequence", default=-1, min=-1)
@@ -741,6 +931,7 @@ class MPP_SceneProperties(PropertyGroup):
         config.batch.overwrite = bool(self.overwrite)
         config.batch.resume = bool(self.resume)
         config.batch.save_validation_report = bool(self.save_validation_report)
+        config.batch.keep_reports = bool(self.keep_reports)
         config.batch.verbose = bool(self.verbose_logging)
         config.composite.enabled = bool(self.compound_enabled)
         config.composite.template_path = self.compound_template_path.strip()
@@ -754,6 +945,49 @@ class MPP_SceneProperties(PropertyGroup):
         config.composite.duration = float(self.compound_duration)
         config.composite.duration_min = float(self.compound_duration_min)
         config.composite.duration_max = float(self.compound_duration_max)
+        config.region.mode = self.region_mode
+        config.region.object_name = self.region_object.strip()
+        if self.region_use_selected:
+            # "Use selected" is resolved here, while the editor still knows the active
+            # object: the config only ever carries a name, so a later run (or another
+            # machine) does not depend on what happened to be selected.
+            import bpy
+
+            active = getattr(bpy.context, "view_layer", None)
+            active = getattr(active, "objects", None)
+            active = getattr(active, "active", None)
+            if active is not None and getattr(active, "name", ""):
+                config.region.object_name = str(active.name)
+        config.region.center = [float(value) for value in self.region_center]
+        config.region.size = [float(value) for value in self.region_size]
+        config.region.rotation = [float(value) for value in self.region_rotation]
+        config.region.margin_percent = float(self.region_margin_percent)
+        config.region.inset = float(self.region_inset)
+        config.region.helper_object = self.region_helper.strip()
+        config.region.margin = float(self.region_margin)
+        config.region.attempts = [int(value) for value in self.region_attempts]
+        config.region.strict = bool(self.region_strict)
+        config.focus.mode = self.focus_mode
+        config.focus.models = [
+            {
+                "id": "",
+                "path": normalize_path(item.path) if item.path else "",
+                "label": item.name.strip(),
+                "object_name": item.object_name.strip(),
+                "scale": float(item.scale),
+                "rotation": [float(value) for value in item.rotation],
+                "enabled": bool(item.enabled),
+            }
+            for item in self.focus_list
+            if item.path
+        ]
+        config.focus.anchor_mode = self.focus_anchor_mode
+        config.focus.anchor_object = self.focus_anchor_object.strip()
+        config.focus.anchor_location = [float(value) for value in self.focus_anchor_location]
+        config.focus.anchor_clearance = float(self.focus_anchor_clearance)
+        config.focus.keep_visible = bool(self.focus_keep_visible)
+        config.focus.visible_ratio = float(self.focus_visible_ratio)
+        config.focus.strict = bool(self.focus_strict)
         config.batch.character_asset_root = (
             normalize_path(self.character_asset_root) if self.character_asset_root else ""
         )
@@ -933,6 +1167,44 @@ class MPP_SceneProperties(PropertyGroup):
             f"Output: {output}"
         )
 
+    def region_ok(self) -> bool:
+        """Can the region be resolved as configured?"""
+        if self.region_mode == "off":
+            return True
+        if self.region_mode == "object":
+            return bool(self.region_object.strip() or self.region_use_selected)
+        if self.region_mode == "numbers":
+            return all(float(value) > 0.0 for value in self.region_size)
+        return True
+
+    def region_summary(self) -> str:
+        """Multi-line description of the camera region (panel label)."""
+        if self.region_mode == "off":
+            return "No region: the camera may end up anywhere the motion takes it."
+        attempts = [int(value) for value in self.region_attempts]
+        where = {
+            "auto": f"fitted to the scene, {float(self.region_margin_percent):g}% margin",
+            "object": f"box of '{self.region_object.strip() or '(pick an object)'}'",
+            "numbers": "centre (%.1f, %.1f, %.1f) m, size (%.1f, %.1f, %.1f) m" % (
+                self.region_center[0], self.region_center[1], self.region_center[2],
+                self.region_size[0], self.region_size[1], self.region_size[2],
+            ),
+        }.get(self.region_mode, self.region_mode)
+        lines = [
+            f"Region: {where}",
+            f"Usable box: inset {float(self.region_inset):.2f} m, "
+            f"keeps {float(self.region_margin):.2f} m clear of the wall",
+            "A shot that leaves the box is re-drawn: segments %d, whole plan %d, "
+            "slower atoms %d, splits %d" % tuple(attempts[:4]),
+            "A path that still leaves the box is reported"
+            + (" and the sequence is skipped." if self.region_strict else "."),
+            "Only moves that change the camera position are tested; pans and zooms are "
+            "never altered.",
+        ]
+        if not self.region_ok():
+            lines.append("Fill in the region object/size, or switch the region off.")
+        return "\n".join(lines)
+
     def from_config(self, config: BatchConfig) -> None:
         """Push a :class:`BatchConfig` into the panel fields."""
         self.output_root = config.batch.output_root
@@ -940,6 +1212,7 @@ class MPP_SceneProperties(PropertyGroup):
         self.overwrite = bool(config.batch.overwrite)
         self.resume = bool(config.batch.resume)
         self.save_validation_report = bool(config.batch.save_validation_report)
+        self.keep_reports = bool(getattr(config.batch, 'keep_reports', False))
         self.verbose_logging = bool(config.batch.verbose)
         self.compound_enabled = bool(config.composite.enabled)
         self.compound_template_path = config.composite.template_path
@@ -953,6 +1226,49 @@ class MPP_SceneProperties(PropertyGroup):
         self.compound_duration = float(config.composite.duration)
         self.compound_duration_min = float(config.composite.duration_min)
         self.compound_duration_max = float(config.composite.duration_max)
+        region = getattr(config, "region", None)
+        if region is not None:
+            self.region_mode = region.mode
+            self.region_object = region.object_name
+            self.region_center = [float(value) for value in region.center]
+            self.region_size = [float(value) for value in region.size]
+            self.region_rotation = [float(value) for value in region.rotation]
+            self.region_margin_percent = float(region.margin_percent)
+            self.region_inset = float(region.inset)
+            self.region_helper = region.helper_object
+            self.region_margin = float(region.margin)
+            attempts = [int(value) for value in list(region.attempts or [])][:4]
+            while len(attempts) < 4:
+                attempts.append(0)
+            self.region_attempts = attempts
+            self.region_strict = bool(getattr(region, "strict", False))
+        focus = getattr(config, "focus", None)
+        if focus is not None:
+            if focus.mode in ("off", "models"):
+                self.focus_mode = focus.mode
+            self.focus_list.clear()
+            for entry in list(focus.models or []):
+                if not isinstance(entry, dict):
+                    continue
+                item = self.focus_list.add()
+                item.path = str(entry.get("path") or "")
+                item.enabled = bool(entry.get("enabled", True))
+                item.name = str(entry.get("label") or "")
+                item.object_name = str(entry.get("object_name") or "")
+                item.scale = float(entry.get("scale") or 1.0)
+                rotation = [float(value) for value in list(entry.get("rotation") or [])][:3]
+                while len(rotation) < 3:
+                    rotation.append(0.0)
+                item.rotation = rotation
+            self.focus_list_index = 0 if len(self.focus_list) else -1
+            if focus.anchor_mode in ("auto", "object", "numbers"):
+                self.focus_anchor_mode = focus.anchor_mode
+            self.focus_anchor_object = focus.anchor_object or ""
+            self.focus_anchor_location = [float(value) for value in focus.anchor_location]
+            self.focus_anchor_clearance = float(focus.anchor_clearance)
+            self.focus_keep_visible = bool(focus.keep_visible)
+            self.focus_visible_ratio = float(focus.visible_ratio)
+            self.focus_strict = bool(focus.strict)
         self.character_asset_root = config.batch.character_asset_root
         self.animation_asset_root = config.batch.animation_asset_root
         if config.batch.character_provider in ("auto", "blender", "null", "unreal_metahuman"):
@@ -1035,6 +1351,10 @@ class MPP_SceneProperties(PropertyGroup):
         # The dropdown selection itself: the numbers travel through BatchConfig, but
         # "custom" vs "scene" is only expressible here.
         "sequence_resolution",
+        # The focus pickers are scratch text: what they collect ends up in focus_list
+        # (which rides inside BatchConfig), but a half-typed path is still a setting.
+        "focus_file",
+        "focus_directory",
     )
     #: Local-render fields worth remembering between runs.
     RENDER_FIELDS = (
@@ -1170,6 +1490,10 @@ class MPP_SceneProperties(PropertyGroup):
         seeded = (
             "template_path", "output_root", "input_root",
             "resolution_explicit", "resolution_x", "resolution_y", "resolution_percentage",
+            # Pre-filled with the name ``mpp.focus_auto_anchor`` creates, so an empty
+            # field would be the surprising state rather than the default one.  (The
+            # names here are *config* keys, not RNA names -- see the loop below.)
+            "anchor_object",
         )
 
         if len(self.scene_list):
@@ -1315,5 +1639,6 @@ def apply_motion_filter(library, patterns) -> int:
 CLASSES = (
     MPP_RenderItem,
     MPP_SceneListItem,
+    MPP_FocusItem,
     MPP_SceneProperties,
 )

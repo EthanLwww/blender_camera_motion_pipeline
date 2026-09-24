@@ -1,0 +1,2778 @@
+{
+  "schema_version": 1,
+  "name": "41 dataset camera moves",
+  "unit_scale": {
+    "fps": 24,
+    "rotation_order": "XYZ"
+  },
+  "duration_seconds": 6.0,
+  "coordinate_system": "camera-local, Blender coordinates used verbatim: location [right, up, back] metres (-Z is forward), rotation [rx, ry, rz] degrees about the camera's own axes, applied to the camera's pose on the sequence's first frame; keys are absolute frames at 24 fps over 6 s",
+  "amplitude_note": "Nominal amplitudes.  Translation may be scaled down to fit the scene (the region box); rotation and focal are never scaled.",
+  "source": "41template.jsonl -- each entry keeps its dataset_key, cap_zh, camera_sentence, targets, tier and group verbatim",
+  "templates": [
+    {
+      "id": "single_arc_ccw",
+      "kind": "single",
+      "tier": "基础",
+      "group": "单一运动",
+      "dataset_key": "S01_b_arc_ccw",
+      "cap_zh": "逆时针环绕",
+      "camera_sentence": "镜头逆时针环绕主体。",
+      "targets": [
+        "Arc counterclockwise"
+      ],
+      "moves": [
+        {
+          "type": "Arc",
+          "direction": "counterclockwise",
+          "speed": null
+        }
+      ],
+      "duration_seconds": 6.0,
+      "fps": 24,
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 24,
+          "location": [
+            -1.035276,
+            0.0,
+            -0.136297
+          ],
+          "rotation": [
+            0.0,
+            -15.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 48,
+          "location": [
+            -2.0,
+            0.0,
+            -0.535898
+          ],
+          "rotation": [
+            0.0,
+            -30.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 72,
+          "location": [
+            -2.828427,
+            0.0,
+            -1.171573
+          ],
+          "rotation": [
+            0.0,
+            -45.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 96,
+          "location": [
+            -3.464102,
+            0.0,
+            -2.0
+          ],
+          "rotation": [
+            0.0,
+            -60.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 120,
+          "location": [
+            -3.863703,
+            0.0,
+            -2.964724
+          ],
+          "rotation": [
+            0.0,
+            -75.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 144,
+          "location": [
+            -4.0,
+            0.0,
+            -4.0
+          ],
+          "rotation": [
+            0.0,
+            -90.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ],
+      "type": "Arc",
+      "direction": "counterclockwise"
+    },
+    {
+      "id": "single_arc_cw",
+      "kind": "single",
+      "tier": "基础",
+      "group": "单一运动",
+      "dataset_key": "S01_b_arc_cw",
+      "cap_zh": "顺时针环绕",
+      "camera_sentence": "镜头顺时针环绕主体。",
+      "targets": [
+        "Arc clockwise"
+      ],
+      "moves": [
+        {
+          "type": "Arc",
+          "direction": "clockwise",
+          "speed": null
+        }
+      ],
+      "duration_seconds": 6.0,
+      "fps": 24,
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 24,
+          "location": [
+            1.035276,
+            0.0,
+            -0.136297
+          ],
+          "rotation": [
+            0.0,
+            15.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 48,
+          "location": [
+            2.0,
+            0.0,
+            -0.535898
+          ],
+          "rotation": [
+            0.0,
+            30.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 72,
+          "location": [
+            2.828427,
+            0.0,
+            -1.171573
+          ],
+          "rotation": [
+            0.0,
+            45.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 96,
+          "location": [
+            3.464102,
+            0.0,
+            -2.0
+          ],
+          "rotation": [
+            0.0,
+            60.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 120,
+          "location": [
+            3.863703,
+            0.0,
+            -2.964724
+          ],
+          "rotation": [
+            0.0,
+            75.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 144,
+          "location": [
+            4.0,
+            0.0,
+            -4.0
+          ],
+          "rotation": [
+            0.0,
+            90.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ],
+      "type": "Arc",
+      "direction": "clockwise"
+    },
+    {
+      "id": "single_crane_down",
+      "kind": "single",
+      "tier": "基础",
+      "group": "单一运动",
+      "dataset_key": "S01_b_crane_down",
+      "cap_zh": "向下降",
+      "camera_sentence": "镜头向下降。",
+      "targets": [
+        "Crane down"
+      ],
+      "moves": [
+        {
+          "type": "Crane",
+          "direction": "down",
+          "speed": null
+        }
+      ],
+      "duration_seconds": 6.0,
+      "fps": 24,
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 144,
+          "location": [
+            0.0,
+            -2.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ],
+      "type": "Crane",
+      "direction": "down"
+    },
+    {
+      "id": "single_crane_up",
+      "kind": "single",
+      "tier": "基础",
+      "group": "单一运动",
+      "dataset_key": "S01_b_crane_up",
+      "cap_zh": "向上升",
+      "camera_sentence": "镜头向上升。",
+      "targets": [
+        "Crane up"
+      ],
+      "moves": [
+        {
+          "type": "Crane",
+          "direction": "up",
+          "speed": null
+        }
+      ],
+      "duration_seconds": 6.0,
+      "fps": 24,
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 144,
+          "location": [
+            0.0,
+            2.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ],
+      "type": "Crane",
+      "direction": "up"
+    },
+    {
+      "id": "single_dolly_in",
+      "kind": "single",
+      "tier": "基础",
+      "group": "单一运动",
+      "dataset_key": "S01_b_dolly_in",
+      "cap_zh": "推近",
+      "camera_sentence": "镜头推近。",
+      "targets": [
+        "Dolly In"
+      ],
+      "moves": [
+        {
+          "type": "Dolly In",
+          "direction": null,
+          "speed": null
+        }
+      ],
+      "duration_seconds": 6.0,
+      "fps": 24,
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 144,
+          "location": [
+            0.0,
+            0.0,
+            -3.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ],
+      "type": "Dolly In",
+      "direction": null
+    },
+    {
+      "id": "single_dolly_out",
+      "kind": "single",
+      "tier": "基础",
+      "group": "单一运动",
+      "dataset_key": "S01_b_dolly_out",
+      "cap_zh": "拉远",
+      "camera_sentence": "镜头拉远。",
+      "targets": [
+        "Dolly Out"
+      ],
+      "moves": [
+        {
+          "type": "Dolly Out",
+          "direction": null,
+          "speed": null
+        }
+      ],
+      "duration_seconds": 6.0,
+      "fps": 24,
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 144,
+          "location": [
+            0.0,
+            0.0,
+            3.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ],
+      "type": "Dolly Out",
+      "direction": null
+    },
+    {
+      "id": "single_pan_left",
+      "kind": "single",
+      "tier": "基础",
+      "group": "单一运动",
+      "dataset_key": "S01_b_pan_left",
+      "cap_zh": "向左摇",
+      "camera_sentence": "镜头向左摇。",
+      "targets": [
+        "Pan left"
+      ],
+      "moves": [
+        {
+          "type": "Pan",
+          "direction": "left",
+          "speed": null
+        }
+      ],
+      "duration_seconds": 6.0,
+      "fps": 24,
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 144,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            45.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ],
+      "type": "Pan",
+      "direction": "left"
+    },
+    {
+      "id": "single_pan_right",
+      "kind": "single",
+      "tier": "基础",
+      "group": "单一运动",
+      "dataset_key": "S01_b_pan_right",
+      "cap_zh": "向右摇",
+      "camera_sentence": "镜头向右摇。",
+      "targets": [
+        "Pan right"
+      ],
+      "moves": [
+        {
+          "type": "Pan",
+          "direction": "right",
+          "speed": null
+        }
+      ],
+      "duration_seconds": 6.0,
+      "fps": 24,
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 144,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            -45.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ],
+      "type": "Pan",
+      "direction": "right"
+    },
+    {
+      "id": "single_roll_ccw",
+      "kind": "single",
+      "tier": "基础",
+      "group": "单一运动",
+      "dataset_key": "S01_b_roll_ccw",
+      "cap_zh": "逆时针滚转",
+      "camera_sentence": "镜头逆时针滚转。",
+      "targets": [
+        "Roll counterclockwise"
+      ],
+      "moves": [
+        {
+          "type": "Roll",
+          "direction": "counterclockwise",
+          "speed": null
+        }
+      ],
+      "duration_seconds": 6.0,
+      "fps": 24,
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 144,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            25.0
+          ],
+          "focal": 35.0
+        }
+      ],
+      "type": "Roll",
+      "direction": "counterclockwise"
+    },
+    {
+      "id": "single_roll_cw",
+      "kind": "single",
+      "tier": "基础",
+      "group": "单一运动",
+      "dataset_key": "S01_b_roll_cw",
+      "cap_zh": "顺时针滚转",
+      "camera_sentence": "镜头顺时针滚转。",
+      "targets": [
+        "Roll clockwise"
+      ],
+      "moves": [
+        {
+          "type": "Roll",
+          "direction": "clockwise",
+          "speed": null
+        }
+      ],
+      "duration_seconds": 6.0,
+      "fps": 24,
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 144,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            -25.0
+          ],
+          "focal": 35.0
+        }
+      ],
+      "type": "Roll",
+      "direction": "clockwise"
+    },
+    {
+      "id": "single_static",
+      "kind": "single",
+      "tier": "基础",
+      "group": "单一运动",
+      "dataset_key": "S01_b_static",
+      "cap_zh": "静止",
+      "camera_sentence": "镜头保持静止。",
+      "targets": [
+        "Static"
+      ],
+      "moves": [
+        {
+          "type": "Static",
+          "direction": null,
+          "speed": null
+        }
+      ],
+      "duration_seconds": 6.0,
+      "fps": 24,
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 144,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ],
+      "type": "Static",
+      "direction": null
+    },
+    {
+      "id": "single_tilt_down",
+      "kind": "single",
+      "tier": "基础",
+      "group": "单一运动",
+      "dataset_key": "S01_b_tilt_down",
+      "cap_zh": "向下俯",
+      "camera_sentence": "镜头向下俯。",
+      "targets": [
+        "Tilt down"
+      ],
+      "moves": [
+        {
+          "type": "Tilt",
+          "direction": "down",
+          "speed": null
+        }
+      ],
+      "duration_seconds": 6.0,
+      "fps": 24,
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 144,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            -20.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ],
+      "type": "Tilt",
+      "direction": "down"
+    },
+    {
+      "id": "single_tilt_up",
+      "kind": "single",
+      "tier": "基础",
+      "group": "单一运动",
+      "dataset_key": "S01_b_tilt_up",
+      "cap_zh": "向上仰",
+      "camera_sentence": "镜头向上仰。",
+      "targets": [
+        "Tilt up"
+      ],
+      "moves": [
+        {
+          "type": "Tilt",
+          "direction": "up",
+          "speed": null
+        }
+      ],
+      "duration_seconds": 6.0,
+      "fps": 24,
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 144,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            20.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ],
+      "type": "Tilt",
+      "direction": "up"
+    },
+    {
+      "id": "single_truck_left",
+      "kind": "single",
+      "tier": "基础",
+      "group": "单一运动",
+      "dataset_key": "S01_b_truck_left",
+      "cap_zh": "向左横移",
+      "camera_sentence": "镜头向左横移。",
+      "targets": [
+        "Truck left"
+      ],
+      "moves": [
+        {
+          "type": "Truck",
+          "direction": "left",
+          "speed": null
+        }
+      ],
+      "duration_seconds": 6.0,
+      "fps": 24,
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 144,
+          "location": [
+            -2.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ],
+      "type": "Truck",
+      "direction": "left"
+    },
+    {
+      "id": "single_truck_right",
+      "kind": "single",
+      "tier": "基础",
+      "group": "单一运动",
+      "dataset_key": "S01_b_truck_right",
+      "cap_zh": "向右横移",
+      "camera_sentence": "镜头向右横移。",
+      "targets": [
+        "Truck right"
+      ],
+      "moves": [
+        {
+          "type": "Truck",
+          "direction": "right",
+          "speed": null
+        }
+      ],
+      "duration_seconds": 6.0,
+      "fps": 24,
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 144,
+          "location": [
+            2.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ],
+      "type": "Truck",
+      "direction": "right"
+    },
+    {
+      "id": "single_zoom_in",
+      "kind": "single",
+      "tier": "基础",
+      "group": "单一运动",
+      "dataset_key": "S01_b_zoom_in",
+      "cap_zh": "变焦推近",
+      "camera_sentence": "镜头变焦推近。",
+      "targets": [
+        "Zoom In"
+      ],
+      "moves": [
+        {
+          "type": "Zoom In",
+          "direction": null,
+          "speed": null
+        }
+      ],
+      "duration_seconds": 6.0,
+      "fps": 24,
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 144,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 70.0
+        }
+      ],
+      "type": "Zoom In",
+      "direction": null
+    },
+    {
+      "id": "single_zoom_out",
+      "kind": "single",
+      "tier": "基础",
+      "group": "单一运动",
+      "dataset_key": "S01_b_zoom_out",
+      "cap_zh": "变焦拉远",
+      "camera_sentence": "镜头变焦拉远。",
+      "targets": [
+        "Zoom Out"
+      ],
+      "moves": [
+        {
+          "type": "Zoom Out",
+          "direction": null,
+          "speed": null
+        }
+      ],
+      "duration_seconds": 6.0,
+      "fps": 24,
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 144,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 18.0
+        }
+      ],
+      "type": "Zoom Out",
+      "direction": null
+    },
+    {
+      "id": "sim_crane_down__tilt_up",
+      "kind": "sim",
+      "tier": "组合",
+      "group": "反向耦合",
+      "dataset_key": "S01_m_crane_down__tilt_up",
+      "cap_zh": "向下降 + 向上仰",
+      "camera_sentence": "镜头向下降并向上仰。",
+      "targets": [
+        "Crane down",
+        "Tilt up"
+      ],
+      "moves": [
+        {
+          "type": "Crane",
+          "direction": "down",
+          "speed": null
+        },
+        {
+          "type": "Tilt",
+          "direction": "up",
+          "speed": null
+        }
+      ],
+      "duration_seconds": 6.0,
+      "fps": 24,
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 144,
+          "location": [
+            0.0,
+            -2.0,
+            0.0
+          ],
+          "rotation": [
+            20.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "sim_crane_up__tilt_down",
+      "kind": "sim",
+      "tier": "组合",
+      "group": "反向耦合",
+      "dataset_key": "S01_m_crane_up__tilt_down",
+      "cap_zh": "向上升 + 向下俯",
+      "camera_sentence": "镜头向上升并向下俯。",
+      "targets": [
+        "Crane up",
+        "Tilt down"
+      ],
+      "moves": [
+        {
+          "type": "Crane",
+          "direction": "up",
+          "speed": null
+        },
+        {
+          "type": "Tilt",
+          "direction": "down",
+          "speed": null
+        }
+      ],
+      "duration_seconds": 6.0,
+      "fps": 24,
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 144,
+          "location": [
+            0.0,
+            2.0,
+            0.0
+          ],
+          "rotation": [
+            -20.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "sim_dolly_in__pan_left",
+      "kind": "sim",
+      "tier": "组合",
+      "group": "异轴同时",
+      "dataset_key": "S01_m_dolly_in__pan_left",
+      "cap_zh": "推近 + 向左摇",
+      "camera_sentence": "镜头推近并向左摇。",
+      "targets": [
+        "Dolly In",
+        "Pan left"
+      ],
+      "moves": [
+        {
+          "type": "Dolly In",
+          "direction": null,
+          "speed": null
+        },
+        {
+          "type": "Pan",
+          "direction": "left",
+          "speed": null
+        }
+      ],
+      "duration_seconds": 6.0,
+      "fps": 24,
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 144,
+          "location": [
+            0.0,
+            0.0,
+            -3.0
+          ],
+          "rotation": [
+            0.0,
+            45.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "sim_dolly_in__tilt_up",
+      "kind": "sim",
+      "tier": "组合",
+      "group": "异轴同时",
+      "dataset_key": "S01_m_dolly_in__tilt_up",
+      "cap_zh": "推近 + 向上仰",
+      "camera_sentence": "镜头推近并向上仰。",
+      "targets": [
+        "Dolly In",
+        "Tilt up"
+      ],
+      "moves": [
+        {
+          "type": "Dolly In",
+          "direction": null,
+          "speed": null
+        },
+        {
+          "type": "Tilt",
+          "direction": "up",
+          "speed": null
+        }
+      ],
+      "duration_seconds": 6.0,
+      "fps": 24,
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 144,
+          "location": [
+            0.0,
+            0.0,
+            -3.0
+          ],
+          "rotation": [
+            20.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "sim_dolly_in__truck_right",
+      "kind": "sim",
+      "tier": "组合",
+      "group": "异轴同时",
+      "dataset_key": "S01_m_dolly_in__truck_right",
+      "cap_zh": "推近 + 向右横移",
+      "camera_sentence": "镜头推近并向右横移。",
+      "targets": [
+        "Dolly In",
+        "Truck right"
+      ],
+      "moves": [
+        {
+          "type": "Dolly In",
+          "direction": null,
+          "speed": null
+        },
+        {
+          "type": "Truck",
+          "direction": "right",
+          "speed": null
+        }
+      ],
+      "duration_seconds": 6.0,
+      "fps": 24,
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 144,
+          "location": [
+            2.0,
+            0.0,
+            -3.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "sim_dolly_out__pan_right",
+      "kind": "sim",
+      "tier": "组合",
+      "group": "异轴同时",
+      "dataset_key": "S01_m_dolly_out__pan_right",
+      "cap_zh": "拉远 + 向右摇",
+      "camera_sentence": "镜头拉远并向右摇。",
+      "targets": [
+        "Dolly Out",
+        "Pan right"
+      ],
+      "moves": [
+        {
+          "type": "Dolly Out",
+          "direction": null,
+          "speed": null
+        },
+        {
+          "type": "Pan",
+          "direction": "right",
+          "speed": null
+        }
+      ],
+      "duration_seconds": 6.0,
+      "fps": 24,
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 144,
+          "location": [
+            0.0,
+            0.0,
+            3.0
+          ],
+          "rotation": [
+            0.0,
+            -45.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "sim_pan_left__tilt_up",
+      "kind": "sim",
+      "tier": "组合",
+      "group": "异轴同时",
+      "dataset_key": "S01_m_pan_left__tilt_up",
+      "cap_zh": "向左摇 + 向上仰",
+      "camera_sentence": "镜头向左摇并向上仰。",
+      "targets": [
+        "Pan left",
+        "Tilt up"
+      ],
+      "moves": [
+        {
+          "type": "Pan",
+          "direction": "left",
+          "speed": null
+        },
+        {
+          "type": "Tilt",
+          "direction": "up",
+          "speed": null
+        }
+      ],
+      "duration_seconds": 6.0,
+      "fps": 24,
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 144,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            20.0,
+            45.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "seq_dolly_in__dolly_out",
+      "kind": "seq",
+      "tier": "组合",
+      "group": "同轴反转",
+      "dataset_key": "S01_s_dolly_in__dolly_out",
+      "cap_zh": "先推近 → 拉远",
+      "camera_sentence": "镜头先推近，随后拉远。",
+      "targets": [
+        "Dolly In",
+        "Dolly Out"
+      ],
+      "moves": [
+        {
+          "type": "Dolly In",
+          "direction": null,
+          "speed": null,
+          "phase": 0
+        },
+        {
+          "type": "Dolly Out",
+          "direction": null,
+          "speed": null,
+          "phase": 1
+        }
+      ],
+      "duration_seconds": 6.0,
+      "fps": 24,
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 72,
+          "location": [
+            0.0,
+            0.0,
+            -3.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 144,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "seq_dolly_in__static",
+      "kind": "seq",
+      "tier": "组合",
+      "group": "起止时机",
+      "dataset_key": "S01_s_dolly_in__static",
+      "cap_zh": "先推近 → 保持静止",
+      "camera_sentence": "镜头先推近，随后保持静止。",
+      "targets": [
+        "Dolly In",
+        "Static"
+      ],
+      "moves": [
+        {
+          "type": "Dolly In",
+          "direction": null,
+          "speed": null,
+          "phase": 0
+        },
+        {
+          "type": "Static",
+          "direction": null,
+          "speed": null,
+          "phase": 1
+        }
+      ],
+      "duration_seconds": 6.0,
+      "fps": 24,
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 72,
+          "location": [
+            0.0,
+            0.0,
+            -3.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 144,
+          "location": [
+            0.0,
+            0.0,
+            -3.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "seq_dolly_out__dolly_in",
+      "kind": "seq",
+      "tier": "组合",
+      "group": "同轴反转",
+      "dataset_key": "S01_s_dolly_out__dolly_in",
+      "cap_zh": "先拉远 → 推近",
+      "camera_sentence": "镜头先拉远，随后推近。",
+      "targets": [
+        "Dolly Out",
+        "Dolly In"
+      ],
+      "moves": [
+        {
+          "type": "Dolly Out",
+          "direction": null,
+          "speed": null,
+          "phase": 0
+        },
+        {
+          "type": "Dolly In",
+          "direction": null,
+          "speed": null,
+          "phase": 1
+        }
+      ],
+      "duration_seconds": 6.0,
+      "fps": 24,
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 72,
+          "location": [
+            0.0,
+            0.0,
+            3.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 144,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "seq_pan_left__static",
+      "kind": "seq",
+      "tier": "组合",
+      "group": "起止时机",
+      "dataset_key": "S01_s_pan_left__static",
+      "cap_zh": "先向左摇 → 保持静止",
+      "camera_sentence": "镜头先向左摇，随后保持静止。",
+      "targets": [
+        "Pan left",
+        "Static"
+      ],
+      "moves": [
+        {
+          "type": "Pan",
+          "direction": "left",
+          "speed": null,
+          "phase": 0
+        },
+        {
+          "type": "Static",
+          "direction": null,
+          "speed": null,
+          "phase": 1
+        }
+      ],
+      "duration_seconds": 6.0,
+      "fps": 24,
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 72,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            45.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 144,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            45.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "seq_pan_left__tilt_up",
+      "kind": "seq",
+      "tier": "组合",
+      "group": "异轴先后",
+      "dataset_key": "S01_s_pan_left__tilt_up",
+      "cap_zh": "先向左摇 → 向上仰",
+      "camera_sentence": "镜头先向左摇，随后向上仰。",
+      "targets": [
+        "Pan left",
+        "Tilt up"
+      ],
+      "moves": [
+        {
+          "type": "Pan",
+          "direction": "left",
+          "speed": null,
+          "phase": 0
+        },
+        {
+          "type": "Tilt",
+          "direction": "up",
+          "speed": null,
+          "phase": 1
+        }
+      ],
+      "duration_seconds": 6.0,
+      "fps": 24,
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 72,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            45.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 144,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            20.0,
+            45.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "seq_pan_right__pan_left",
+      "kind": "seq",
+      "tier": "组合",
+      "group": "同轴反转",
+      "dataset_key": "S01_s_pan_right__pan_left",
+      "cap_zh": "先向右摇 → 向左摇",
+      "camera_sentence": "镜头先向右摇，随后向左摇。",
+      "targets": [
+        "Pan right",
+        "Pan left"
+      ],
+      "moves": [
+        {
+          "type": "Pan",
+          "direction": "right",
+          "speed": null,
+          "phase": 0
+        },
+        {
+          "type": "Pan",
+          "direction": "left",
+          "speed": null,
+          "phase": 1
+        }
+      ],
+      "duration_seconds": 6.0,
+      "fps": 24,
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 72,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            -45.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 144,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "seq_static__dolly_in",
+      "kind": "seq",
+      "tier": "组合",
+      "group": "起止时机",
+      "dataset_key": "S01_s_static__dolly_in",
+      "cap_zh": "先保持静止 → 推近",
+      "camera_sentence": "镜头先保持静止，随后推近。",
+      "targets": [
+        "Static",
+        "Dolly In"
+      ],
+      "moves": [
+        {
+          "type": "Static",
+          "direction": null,
+          "speed": null,
+          "phase": 0
+        },
+        {
+          "type": "Dolly In",
+          "direction": null,
+          "speed": null,
+          "phase": 1
+        }
+      ],
+      "duration_seconds": 6.0,
+      "fps": 24,
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 72,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 144,
+          "location": [
+            0.0,
+            0.0,
+            -3.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "seq_static__pan_left",
+      "kind": "seq",
+      "tier": "组合",
+      "group": "起止时机",
+      "dataset_key": "S01_s_static__pan_left",
+      "cap_zh": "先保持静止 → 向左摇",
+      "camera_sentence": "镜头先保持静止，随后向左摇。",
+      "targets": [
+        "Static",
+        "Pan left"
+      ],
+      "moves": [
+        {
+          "type": "Static",
+          "direction": null,
+          "speed": null,
+          "phase": 0
+        },
+        {
+          "type": "Pan",
+          "direction": "left",
+          "speed": null,
+          "phase": 1
+        }
+      ],
+      "duration_seconds": 6.0,
+      "fps": 24,
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 72,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 144,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            45.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "seq_static__zoom_in",
+      "kind": "seq",
+      "tier": "组合",
+      "group": "起止时机",
+      "dataset_key": "S01_s_static__zoom_in",
+      "cap_zh": "先保持静止 → 变焦推近",
+      "camera_sentence": "镜头先保持静止，随后变焦推近。",
+      "targets": [
+        "Static",
+        "Zoom In"
+      ],
+      "moves": [
+        {
+          "type": "Static",
+          "direction": null,
+          "speed": null,
+          "phase": 0
+        },
+        {
+          "type": "Zoom In",
+          "direction": null,
+          "speed": null,
+          "phase": 1
+        }
+      ],
+      "duration_seconds": 6.0,
+      "fps": 24,
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 72,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 144,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 70.0
+        }
+      ]
+    },
+    {
+      "id": "seq_tilt_down__pan_right",
+      "kind": "seq",
+      "tier": "组合",
+      "group": "异轴先后",
+      "dataset_key": "S01_s_tilt_down__pan_right",
+      "cap_zh": "先向下俯 → 向右摇",
+      "camera_sentence": "镜头先向下俯，随后向右摇。",
+      "targets": [
+        "Tilt down",
+        "Pan right"
+      ],
+      "moves": [
+        {
+          "type": "Tilt",
+          "direction": "down",
+          "speed": null,
+          "phase": 0
+        },
+        {
+          "type": "Pan",
+          "direction": "right",
+          "speed": null,
+          "phase": 1
+        }
+      ],
+      "duration_seconds": 6.0,
+      "fps": 24,
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 72,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            -20.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 144,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            -20.0,
+            -45.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "seq_tilt_up__pan_left",
+      "kind": "seq",
+      "tier": "组合",
+      "group": "异轴先后",
+      "dataset_key": "S01_s_tilt_up__pan_left",
+      "cap_zh": "先向上仰 → 向左摇",
+      "camera_sentence": "镜头先向上仰，随后向左摇。",
+      "targets": [
+        "Tilt up",
+        "Pan left"
+      ],
+      "moves": [
+        {
+          "type": "Tilt",
+          "direction": "up",
+          "speed": null,
+          "phase": 0
+        },
+        {
+          "type": "Pan",
+          "direction": "left",
+          "speed": null,
+          "phase": 1
+        }
+      ],
+      "duration_seconds": 6.0,
+      "fps": 24,
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 72,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            20.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 144,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            20.0,
+            45.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "seq_tilt_up__tilt_down",
+      "kind": "seq",
+      "tier": "组合",
+      "group": "同轴反转",
+      "dataset_key": "S01_s_tilt_up__tilt_down",
+      "cap_zh": "先向上仰 → 向下俯",
+      "camera_sentence": "镜头先向上仰，随后向下俯。",
+      "targets": [
+        "Tilt up",
+        "Tilt down"
+      ],
+      "moves": [
+        {
+          "type": "Tilt",
+          "direction": "up",
+          "speed": null,
+          "phase": 0
+        },
+        {
+          "type": "Tilt",
+          "direction": "down",
+          "speed": null,
+          "phase": 1
+        }
+      ],
+      "duration_seconds": 6.0,
+      "fps": 24,
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 72,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            20.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 144,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "seq_truck_right__tilt_up",
+      "kind": "seq",
+      "tier": "组合",
+      "group": "异轴先后",
+      "dataset_key": "S01_s_truck_right__tilt_up",
+      "cap_zh": "先向右横移 → 向上仰",
+      "camera_sentence": "镜头先向右横移，随后向上仰。",
+      "targets": [
+        "Truck right",
+        "Tilt up"
+      ],
+      "moves": [
+        {
+          "type": "Truck",
+          "direction": "right",
+          "speed": null,
+          "phase": 0
+        },
+        {
+          "type": "Tilt",
+          "direction": "up",
+          "speed": null,
+          "phase": 1
+        }
+      ],
+      "duration_seconds": 6.0,
+      "fps": 24,
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 72,
+          "location": [
+            2.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 144,
+          "location": [
+            2.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            20.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "tri_dolly_in__static__dolly_out",
+      "kind": "tri",
+      "tier": "组合",
+      "group": "三段式",
+      "dataset_key": "S01_t_dolly_in__static__dolly_out",
+      "cap_zh": "先推近 → 保持静止 → 拉远",
+      "camera_sentence": "镜头先推近，然后保持静止，最后拉远。",
+      "targets": [
+        "Dolly In",
+        "Static",
+        "Dolly Out"
+      ],
+      "moves": [
+        {
+          "type": "Dolly In",
+          "direction": null,
+          "speed": null,
+          "phase": 0
+        },
+        {
+          "type": "Static",
+          "direction": null,
+          "speed": null,
+          "phase": 1
+        },
+        {
+          "type": "Dolly Out",
+          "direction": null,
+          "speed": null,
+          "phase": 2
+        }
+      ],
+      "duration_seconds": 6.0,
+      "fps": 24,
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 48,
+          "location": [
+            0.0,
+            0.0,
+            -3.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 96,
+          "location": [
+            0.0,
+            0.0,
+            -3.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 144,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "tri_pan_left__static__pan_right",
+      "kind": "tri",
+      "tier": "组合",
+      "group": "三段式",
+      "dataset_key": "S01_t_pan_left__static__pan_right",
+      "cap_zh": "先向左摇 → 保持静止 → 向右摇",
+      "camera_sentence": "镜头先向左摇，然后保持静止，最后向右摇。",
+      "targets": [
+        "Pan left",
+        "Static",
+        "Pan right"
+      ],
+      "moves": [
+        {
+          "type": "Pan",
+          "direction": "left",
+          "speed": null,
+          "phase": 0
+        },
+        {
+          "type": "Static",
+          "direction": null,
+          "speed": null,
+          "phase": 1
+        },
+        {
+          "type": "Pan",
+          "direction": "right",
+          "speed": null,
+          "phase": 2
+        }
+      ],
+      "duration_seconds": 6.0,
+      "fps": 24,
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 48,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            45.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 96,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            45.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 144,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "tri_static__pan_left__static",
+      "kind": "tri",
+      "tier": "组合",
+      "group": "三段式",
+      "dataset_key": "S01_t_static__pan_left__static",
+      "cap_zh": "先保持静止 → 向左摇 → 保持静止",
+      "camera_sentence": "镜头先保持静止，然后向左摇，最后保持静止。",
+      "targets": [
+        "Static",
+        "Pan left"
+      ],
+      "moves": [
+        {
+          "type": "Static",
+          "direction": null,
+          "speed": null,
+          "phase": 0
+        },
+        {
+          "type": "Pan",
+          "direction": "left",
+          "speed": null,
+          "phase": 1
+        },
+        {
+          "type": "Static",
+          "direction": null,
+          "speed": null,
+          "phase": 2
+        }
+      ],
+      "duration_seconds": 6.0,
+      "fps": 24,
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 48,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 96,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            45.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 144,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            45.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    },
+    {
+      "id": "tri_tilt_up__pan_left__tilt_down",
+      "kind": "tri",
+      "tier": "组合",
+      "group": "三段式",
+      "dataset_key": "S01_t_tilt_up__pan_left__tilt_down",
+      "cap_zh": "先向上仰 → 向左摇 → 向下俯",
+      "camera_sentence": "镜头先向上仰，然后向左摇，最后向下俯。",
+      "targets": [
+        "Tilt up",
+        "Pan left",
+        "Tilt down"
+      ],
+      "moves": [
+        {
+          "type": "Tilt",
+          "direction": "up",
+          "speed": null,
+          "phase": 0
+        },
+        {
+          "type": "Pan",
+          "direction": "left",
+          "speed": null,
+          "phase": 1
+        },
+        {
+          "type": "Tilt",
+          "direction": "down",
+          "speed": null,
+          "phase": 2
+        }
+      ],
+      "duration_seconds": 6.0,
+      "fps": 24,
+      "keys": [
+        {
+          "frame": 0,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 48,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            20.0,
+            0.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 96,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            20.0,
+            45.0,
+            0.0
+          ],
+          "focal": 35.0
+        },
+        {
+          "frame": 144,
+          "location": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            45.0,
+            0.0
+          ],
+          "focal": 35.0
+        }
+      ]
+    }
+  ]
+}

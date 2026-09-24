@@ -255,6 +255,70 @@ def build_suite() -> Suite:
         moved = (end - start).length
         ok(abs(moved - 0.8) < 0.05, f"expected an 0.8 m dolly, measured {moved:.4f} m")
 
+    @suite.case("trajectory sampling uses the F-curves and matches the depsgraph")
+    def _():
+        # ``sample_camera_trajectory`` used to run scene.frame_set() per frame, which
+        # re-evaluates the whole scene: on a scattering-heavy scene that is seconds per
+        # frame, so a 216-frame sequence spent ~20 minutes building its trajectory
+        # before the first frame was rendered.  A plain F-curve camera is now evaluated
+        # from its curves; these cases pin both the shortcut and its equivalence.
+        import bpy
+
+        from blender_motion_pipeline.render import metadata_exporter as mx
+
+        scene, camera = _scene_with_animated_camera()
+        camera.rotation_mode = "QUATERNION"
+        # location must drive the pose from the same slot the object uses -- the
+        # fixture keys ``lens`` on the camera data, which in Blender 5 lives in the
+        # *same* action as another slot (the regression this covers).
+        for frame, x in ((1, 0.0), (5, 1.0), (10, 2.0)):
+            scene.frame_set(frame)
+            camera.location = (x, 0.5, 5.0)
+            camera.keyframe_insert("location", frame=frame)
+
+        equal(mx.analytic_camera_reason(camera), "",
+              "a keyframed camera with no constraints must take the F-curve path")
+
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        frames = list(range(1, 11))
+        poses = mx.analytic_camera_poses(camera, frames)
+        ok(poses is not None and len(poses) == len(frames), "poses must be produced")
+        ok(mx.verify_camera_poses(camera, scene, depsgraph, frames, poses),
+           "the analytic poses must match the dependency graph")
+
+        fast = mx.sample_camera_trajectory(camera, frame_start=1, frame_end=10,
+                                          scene=scene, depsgraph=depsgraph)
+        original = mx.analytic_camera_poses
+        mx.analytic_camera_poses = lambda *a, **k: None
+        try:
+            slow = mx.sample_camera_trajectory(camera, frame_start=1, frame_end=10,
+                                              scene=scene, depsgraph=depsgraph)
+        finally:
+            mx.analytic_camera_poses = original
+        equal(len(fast), len(slow))
+        for a, b in zip(fast, slow):
+            equal(a.frame, b.frame)
+            ok(abs(a.focal_length - b.focal_length) < 1e-6, (a.focal_length, b.focal_length))
+            for name in ("r00", "r01", "r02", "tx", "r10", "r11", "r12", "ty",
+                         "r20", "r21", "r22", "tz"):
+                ok(abs(getattr(a, name) - getattr(b, name)) < 1e-5,
+                   f"{name} differs: {getattr(a, name)} vs {getattr(b, name)}")
+
+    @suite.case("a constrained camera reports why it needs the dependency graph")
+    def _():
+        import bpy
+
+        from blender_motion_pipeline.render import metadata_exporter as mx
+
+        _scene, camera = _scene_with_animated_camera()
+        equal(mx.analytic_camera_reason(camera), "")
+        constraint = camera.constraints.new(type="LIMIT_LOCATION")
+        constraint.use_min_x = True
+        ok("constraint" in mx.analytic_camera_reason(camera),
+           mx.analytic_camera_reason(camera))
+        equal(mx.analytic_camera_poses(camera, [1, 2]), None,
+              "the shortcut must refuse a camera it cannot model")
+
     return suite
 
 

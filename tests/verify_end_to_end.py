@@ -292,8 +292,6 @@ def step_check_artifacts(root: str) -> str:
             "sequence_config.json",
             f"{name}.json",
             f"{name}_camera.txt",
-            "generation_log.txt",
-            "validation_report.json",
         ):
             if expected not in files:
                 problems.append(f"{current}: missing {expected}")

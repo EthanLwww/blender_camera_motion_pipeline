@@ -19,6 +19,7 @@
         "overwrite": { "type": "boolean" },
         "resume": { "type": "boolean" },
         "save_validation_report": { "type": "boolean" },
+        "keep_reports": { "type": "boolean" },
         "verbose": { "type": "boolean" },
         "character_asset_root": { "type": "string" },
         "animation_asset_root": { "type": "string" },
@@ -203,6 +204,80 @@
         "output_mode": { "type": "string", "enum": ["with_base", "only_compound", "only_base"] },
         "max_full_sequences": { "type": "integer", "minimum": 1 },
         "max_partial_sequences": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "region": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Where the camera may travel: one oriented box in world space. A shot whose path leaves the box is re-drawn (segment, whole plan, slower atoms, split) and reported; atomic motions are never bent to fit.",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["off", "auto", "object", "numbers"],
+          "description": "off disables the feature; auto fits a box to the scene's own objects; object uses one object's box; numbers uses centre/size/rotation."
+        },
+        "object_name": { "type": "string", "description": "Required for mode=object." },
+        "center": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
+        "size": {
+          "type": "array", "items": { "type": "number", "exclusiveMinimum": 0 },
+          "minItems": 3, "maxItems": 3,
+          "description": "Full box size (X, Y, Z) in metres for mode=numbers."
+        },
+        "rotation": {
+          "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3,
+          "description": "Box orientation, XYZ degrees."
+        },
+        "margin_percent": { "type": "number", "minimum": 0, "description": "Extra room kept around what mode=auto detects." },
+        "inset": { "type": "number", "minimum": 0, "description": "Shrink the usable box by this many metres." },
+        "helper_object": { "type": "string", "description": "Helper box drawn in the editor; it is hidden from renders and ignored by mode=auto." },
+        "margin": { "type": "number", "minimum": 0, "description": "Safety room a path must leave to be accepted, in metres." },
+        "attempts": {
+          "type": "array", "items": { "type": "integer", "minimum": 0 },
+          "minItems": 4, "maxItems": 4,
+          "description": "Tries per re-draw stage: segment redraws, whole-plan redraws, slower-atom redraws, segment splits."
+        },
+        "strict": { "type": "boolean", "description": "Do not write a sequence whose camera path still leaves the box." }
+      }
+    },
+    "focus": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Focus objects: models placed on the scene's single anchor point, one axis of the output matrix (scene x camera x motion x focus object). An Arc shot orbits the object; every other motion is unchanged and the object is simply in frame.",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["off", "models"],
+          "description": "off disables the feature completely; models adds one axis per enabled entry of models."
+        },
+        "models": {
+          "type": "array",
+          "description": "The .blend models to place, in generation order.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "id": { "type": "string", "description": "Stable id used in metadata; derived from the file name when empty. Never appears in an output path." },
+              "path": { "type": "string", "description": "Absolute path to the .blend model." },
+              "label": { "type": "string", "description": "Human readable name (defaults to the file name)." },
+              "object_name": { "type": "string", "description": "Take only this object out of the file; empty takes the whole file." },
+              "scale": { "type": "number", "exclusiveMinimum": 0, "description": "Uniform scale applied to the model." },
+              "rotation": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3, "description": "Model orientation, XYZ degrees." },
+              "enabled": { "type": "boolean", "description": "Disabled entries are ignored (and do not need to exist)." }
+            },
+            "required": ["path"]
+          }
+        },
+        "anchor_mode": {
+          "type": "string",
+          "enum": ["auto", "object", "numbers"],
+          "description": "auto finds the middle of the open part of the scene; object uses anchor_object; numbers uses anchor_location."
+        },
+        "anchor_object": { "type": "string", "description": "Name of the empty marking the anchor (mode=object)." },
+        "anchor_location": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3, "description": "Anchor point in world metres (mode=numbers)." },
+        "anchor_clearance": { "type": "number", "minimum": 0, "description": "Free space mode=auto looks for around the anchor, in metres." },
+        "keep_visible": { "type": "boolean", "description": "Check per sequence that the focus object really stayed in frame." },
+        "visible_ratio": { "type": "number", "minimum": 0, "maximum": 1, "description": "Share of the frames the object has to be in frame for." },
+        "strict": { "type": "boolean", "description": "Do not write a sequence whose focus object ends up out of frame." }
       }
     }
   }

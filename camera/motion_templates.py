@@ -695,16 +695,37 @@ class MotionTemplateLibrary:
         self._templates[template.validate().name] = template
 
     def restrict_to(self, names: Sequence[str]) -> None:
+        """Keep only the named templates; a name may be a glob.
+
+        An exact name always wins, and anything else is tried as a glob (``dolly_*``),
+        which is what the ``--motion-filter`` flag and the panel's *Motion filter* have
+        always advertised.  An entry that matches nothing is still a hard error, so a
+        typo cannot silently shrink a run to nothing.
+        """
+        import fnmatch
+
         wanted = [str(n).strip() for n in names if str(n).strip()]
         if not wanted:
             return
-        missing = [n for n in wanted if n not in self._templates]
+        chosen: "list[str]" = []
+        missing: "list[str]" = []
+        for entry in wanted:
+            if entry in self._templates:
+                if entry not in chosen:
+                    chosen.append(entry)
+                continue
+            matched = [name for name in self._templates
+                       if fnmatch.fnmatch(name, entry) and name not in chosen]
+            if matched:
+                chosen.extend(matched)
+            else:
+                missing.append(entry)
         if missing:
             raise ConfigError(
                 f"requested motion template(s) not found: {', '.join(missing)}; "
                 f"available: {', '.join(self.names)}"
             )
-        self._templates = {name: self._templates[name] for name in wanted}
+        self._templates = {name: self._templates[name] for name in chosen}
 
     def apply_overrides(self, overrides: dict) -> None:
         """Apply ``{template_name: {parameters...}}`` or ``{"*": {...}}``."""

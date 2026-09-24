@@ -105,6 +105,7 @@ from blender_motion_pipeline.io.path_utils import (  # noqa: E402
     to_forward_slashes,
 )
 from blender_motion_pipeline.render.metadata_exporter import (  # noqa: E402
+    analytic_camera_reason,
     build_render_metadata,
     sample_camera_trajectory,
     video_extension,
@@ -206,6 +207,16 @@ def build_parser() -> argparse.ArgumentParser:
     frames.add_argument("--device", default="", choices=["", "CPU", "GPU"],
                         help="Cycles device override")
     frames.add_argument("--tile-size", type=int, default=None, help="Cycles tile size (where supported)")
+    frames.add_argument("--denoise", dest="denoise", action="store_true", default=None,
+                        help="turn Cycles/EEVEE denoising on (lets you drop the sample count)")
+    frames.add_argument("--no-denoise", dest="denoise", action="store_false",
+                        help="turn denoising off")
+    frames.add_argument("--persistent-data", dest="persistent_data", action="store_true", default=None,
+                        help="keep the render engine's data between frames: for a camera-only "
+                             "move this skips re-syncing the whole scene every frame, which is "
+                             "what makes a heavy scene slow (memory grows instead)")
+    frames.add_argument("--no-persistent-data", dest="persistent_data", action="store_false",
+                        help="re-sync the scene on every frame (Blender's default)")
 
     traj = parser.add_argument_group("trajectory export")
     traj.add_argument("--trajectory-mode", default="all_frames", choices=["all_frames", "sampled"],
@@ -709,6 +720,32 @@ def configure_render(scene, args, *, engine: str, recorded: dict = None) -> dict
                         continue
     applied["samples"] = samples_applied
 
+    # -- denoising / persistent data -------------------------------------
+    # Rendering only the camera means the geometry never changes between frames, so
+    # persistent data turns "sync the whole scene per frame" into "sync once"; and
+    # denoising is what makes a low sample count usable.
+    if args.denoise is not None:
+        targets = []
+        if render.engine == "CYCLES" and hasattr(scene, "cycles"):
+            targets.append((scene.cycles, "use_denoising"))
+        if render.engine.startswith("BLENDER_EEVEE") and hasattr(scene, "eevee"):
+            targets.append((scene.eevee, "use_denoising"))
+        for owner, attribute in targets:
+            if hasattr(owner, attribute):
+                try:
+                    setattr(owner, attribute, bool(args.denoise))
+                    applied["denoise"] = bool(args.denoise)
+                except Exception as exc:
+                    LOGGER.warning("denoising could not be set: %s", exc)
+            else:
+                LOGGER.info("this engine has no %s setting; --denoise ignored", attribute)
+    if args.persistent_data is not None:
+        try:
+            render.use_persistent_data = bool(args.persistent_data)
+            applied["persistent_data"] = bool(args.persistent_data)
+        except Exception as exc:
+            LOGGER.warning("persistent data could not be set: %s", exc)
+
     if args.device:
         try:
             scene.cycles.device = args.device
@@ -939,7 +976,52 @@ def load_sequence_scene(job: dict, result: dict, mappings=()) -> "tuple[bool, st
         summary.get("object_name", ""),
         f", muted {', '.join(summary['muted_constraints'])}" if summary.get("muted_constraints") else "",
     )
+    _apply_focus_objects(job, result)
     return True, source
+
+
+def _apply_focus_objects(job: dict, result: dict) -> None:
+    """Show the sequence's focus object and hide every other one.
+
+    The staged scene copy carries the focus models, all hidden and registered by name
+    (``scene["mpp_focus_objects"]``).  Which one belongs to *this* sequence is in
+    ``sequence_config.json``, so the picture here is the one the generator measured:
+    a sequence with no subject hides all of them, which matters because the whole tree
+    renders in one Blender process and the previous sequence's subject would otherwise
+    still be standing there.
+    """
+    import bpy
+
+    # Absolute, like every other import in this file: it is run as a script
+    # (``blender -b -P render_sequences.py``), where a relative import cannot resolve
+    # -- ``from ..core import focus`` raised "attempted relative import with no known
+    # parent package" and took every render down with it.
+    from blender_motion_pipeline.core import focus as focus_objects
+
+    scene = bpy.context.scene
+    registered = focus_objects.registered_names(scene)
+    if not registered:
+        return
+    block = (job.get("config") or {}).get("focus") or {}
+    wanted = [str(name) for name in (block.get("objects") or [])]
+    report = focus_objects.apply_visibility(scene, wanted)
+    result["focus"] = {
+        "object": block.get("object") or "",
+        "shown": report["shown"],
+        "hidden": len(report["hidden"]),
+    }
+    if block and not report["shown"]:
+        warning = (
+            f"this sequence is generated for focus object {block.get('object')!r} but none of "
+            f"its objects are in the scene ({', '.join(wanted) or 'none listed'})"
+        )
+        result["warnings"].append(warning)
+        LOGGER.warning("%s", warning)
+    elif not block and report["hidden"]:
+        LOGGER.info("focus objects: all %d hidden (this sequence has no subject)",
+                    report["hidden"])
+    elif report["shown"]:
+        LOGGER.info("focus objects: showing %s", ", ".join(report["shown"]))
 
 
 def render_sequence(job: dict, args, *, mappings, check_assets: bool = True) -> dict:
@@ -1060,6 +1142,17 @@ def render_sequence(job: dict, args, *, mappings, check_assets: bool = True) -> 
     ensure_dir(os.path.dirname(outputs["video"]))
 
     # -- trajectory (before rendering, so it reflects what will be drawn) --
+    # The camera pose of every frame normally comes from the dependency graph, which
+    # re-evaluates the whole scene per frame; a plain F-curve camera is evaluated from
+    # its curves instead, which on a heavy scene turns minutes of pre-pass into
+    # milliseconds.  Say which path was taken, so a surprise is visible in the log.
+    reason = analytic_camera_reason(camera)
+    LOGGER.info(
+        "%s: camera trajectory from %s (%s..%s, mode=%s, step=%d)",
+        job["sequence_id"],
+        "the action's F-curves" if not reason else "the dependency graph (%s)" % reason,
+        frame_start, frame_end, args.trajectory_mode, max(1, args.trajectory_step),
+    )
     try:
         rows = sample_camera_trajectory(
             camera, frame_start=frame_start, frame_end=frame_end,
@@ -1160,10 +1253,15 @@ def render_sequence(job: dict, args, *, mappings, check_assets: bool = True) -> 
                                    os.path.dirname(outputs["video"]), config)
     if plan_path:
         outputs["motion_plan"] = plan_path
-    _write_render_log(outputs["log"], job, result, rows, applied, outputs)
+    # ``ok`` has to be set *before* the log is written: the log prints
+    # ``status: ok`` / ``status: <error>`` from it, and an earlier version set it one
+    # statement later, so every successful render wrote ``status: failed`` next to a
+    # finished video (the report and the sidecar JSON had it right, the file a human
+    # reads first did not).
     result["ok"] = True
-    result["files"] = {key: to_forward_slashes(value) for key, value in outputs.items()}
     result["frame_count"] = len(rows)
+    _write_render_log(outputs["log"], job, result, rows, applied, outputs)
+    result["files"] = {key: to_forward_slashes(value) for key, value in outputs.items()}
     LOGGER.info(
         "rendered %s -> %s (%d exported frame(s), %.1fs)",
         job["sequence_id"], to_forward_slashes(outputs["video"]), len(rows), time.time() - started,

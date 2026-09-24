@@ -41,7 +41,13 @@ import time
 from dataclasses import dataclass, field
 
 from ..io.json_io import save_json_file
-from ..io.path_utils import ensure_dir, normalize_path, relative_to, to_forward_slashes
+from ..io.path_utils import (
+    ensure_dir,
+    normalize_path,
+    relative_to,
+    safe_filename,
+    to_forward_slashes,
+)
 
 #: Folder created inside the folder the user picks.
 PROJECT_PREFIX = "blender_camera_"
@@ -65,9 +71,177 @@ IMAGE_RENDER_ALL = "/usr/local/bin/render-all.sh"
 PROJECT_JSON = "project.json"
 README_NAME = "RENDER_README.md"
 
+#: Written by ``render/pack_textures.py`` next to the packed scenes.
+PACK_REPORT = "pack_report.json"
+FOCUS_REPORT = "focus_report.json"
 
-class ProjectError(RuntimeError):
-    """The project folder could not be created."""
+
+def package_root() -> str:
+    """The add-on package folder (the parent of ``core/``)."""
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def pack_scene(path: str, *, blender: str = "", logger=None, timeout: float = 7200.0,
+               report: str = "") -> dict:
+    """Embed every external file *path* references, in a throwaway Blender process.
+
+    A generation run has the artist's scene open, so a staged copy cannot be packed in
+    place: ``pack_textures.py`` opens the copy, packs it and saves it back -- which is
+    exactly the work a render node would otherwise have to do, or silently skip with a
+    "file not found" per frame.  Files that no longer exist cannot be packed; they are
+    reported in ``missing`` so the run can warn while it still matters.
+    """
+    import subprocess
+
+    target = normalize_path(path)
+    record = {"path": to_forward_slashes(target), "ok": False, "packed": [], "missing": [],
+              "note": "", "error": "", "packed_count": 0, "missing_count": 0}
+    script = os.path.join(package_root(), "render", "pack_textures.py")
+    if not os.path.isfile(script):
+        record["error"] = "pack_textures.py is not next to the package"
+        return record
+    binary = str(blender or "")
+    if not binary:
+        try:
+            import bpy
+
+            binary = str(getattr(bpy.app, "binary_path", "") or "")
+        except Exception:
+            binary = ""
+    if not binary or not os.path.isfile(binary):
+        record["error"] = "no Blender binary available to pack with"
+        return record
+
+    report = normalize_path(report) if report else os.path.join(
+        os.path.dirname(os.path.dirname(target)), PACK_REPORT)
+    command = [binary, "-b", "-noaudio", target, "-P", script, "--",
+               "--scene", target, "--report", report, "--log-level", "WARNING"]
+    try:
+        completed = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
+    except Exception as exc:  # noqa: BLE001 - reported to the caller
+        record["error"] = f"packing failed: {exc}"
+        return record
+
+    payload = {}
+    try:
+        from ..io.json_io import load_json_file
+
+        payload = load_json_file(report, default={}, required=False) or {}
+    except Exception:
+        payload = {}
+    scenes = payload.get("scenes") or []
+    if scenes and isinstance(scenes[0], dict):
+        for key in ("ok", "packed", "missing", "note", "error"):
+            if key in scenes[0]:
+                record[key] = scenes[0][key]
+    record["packed_count"] = len(record.get("packed") or [])
+    record["missing_count"] = len(record.get("missing") or [])
+    record["report"] = to_forward_slashes(report)
+    if not record["ok"] and not record["error"]:
+        tail = (completed.stderr or completed.stdout or "").strip().splitlines()[-1:]
+        record["error"] = tail[0] if tail else "pack_textures.py reported no scene record"
+    if logger is not None:
+        logger.info(
+            "scene assets: %s -- %s (%d packed, %d missing)",
+            os.path.basename(target),
+            record["note"] or ("failed: " + str(record["error"])),
+            record["packed_count"], record["missing_count"],
+        )
+    return record
+
+
+def place_focus_models(path: str, models, *, anchor=None, blender: str = "", logger=None,
+                       timeout: float = 7200.0, report: str = "") -> dict:
+    """Put every focus model on the scene's anchor, inside a staged copy.
+
+    Runs ``render/place_focus_objects.py`` in a throwaway Blender process for the same
+    reason ``pack_scene`` does: the generation run has the artist's file open, and the
+    copy has to be edited and saved back out of process.  What comes back is the
+    placement of every model -- object names, world bounds, the anchor -- which is what
+    the arc retarget and the visibility check are computed from, so the numbers in the
+    report describe the picture the render node will film.
+    """
+    import subprocess
+    import tempfile
+
+    from ..io.json_io import load_json_file, save_json_file
+
+    target = normalize_path(path)
+    record = {"path": to_forward_slashes(target), "ok": False, "anchor": {},
+              "models": [], "placements": [], "note": "", "error": "", "report": ""}
+    script = os.path.join(package_root(), "render", "place_focus_objects.py")
+    if not os.path.isfile(script):
+        record["error"] = "place_focus_objects.py is not next to the package"
+        return record
+    if not models:
+        record["note"] = "no focus models are enabled"
+        return record
+    binary = str(blender or "")
+    if not binary:
+        try:
+            import bpy
+
+            binary = str(getattr(bpy.app, "binary_path", "") or "")
+        except Exception:
+            binary = ""
+    if not binary or not os.path.isfile(binary):
+        record["error"] = "no Blender binary available to place the focus models with"
+        return record
+
+    job = {"scene": target, "anchor": dict(anchor or {}),
+           "models": [model.to_dict() for model in models]}
+    scratch = tempfile.mkdtemp(prefix="mpp_focus_")
+    job_path = os.path.join(scratch, "focus_job.json")
+    out_path = os.path.join(scratch, "focus_report.json")
+    save_json_file(job_path, job)
+    command = [binary, "-b", "-noaudio", target, "-P", script, "--",
+               "--scene", target, "--job", job_path, "--report", out_path]
+    try:
+        completed = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
+    except Exception as exc:  # noqa: BLE001 - reported to the caller
+        record["error"] = f"placing the focus models failed: {exc}"
+        return record
+
+    payload = {}
+    try:
+        payload = load_json_file(out_path, default={}, required=False) or {}
+    except Exception:
+        payload = {}
+    for key in ("ok", "anchor", "models", "placements", "note", "error"):
+        if key in payload:
+            record[key] = payload[key]
+    record["report"] = to_forward_slashes(report) if report else ""
+    if not record["ok"] and not record["error"]:
+        # The child writes a report on every path it controls, so a missing one means it
+        # never got that far.  Its own last words are the only useful diagnosis, and on a
+        # loaded machine ("Blender quit" with nothing before it) they say so.
+        tail = [line.strip() for line in (completed.stderr or completed.stdout or "").strip().splitlines()
+                if line.strip()][-4:]
+        record["error"] = (" | ".join(tail)[-500:] if tail
+                           else "place_focus_objects.py exited without a report")
+    if report:
+        # Accumulate one entry per scene, the way pack_report.json does, so a re-run
+        # replaces this scene's record instead of dropping the other scenes'.
+        existing = load_json_file(report, default={}, required=False) or {}
+        scenes = [item for item in (existing.get("scenes") or [])
+                  if str((item or {}).get("scene") or "") != target]
+        scenes.append({"scene": target, "anchor": record.get("anchor") or {},
+                       "ok": record["ok"], "models": record.get("models") or [],
+                       "placements": record.get("placements") or [],
+                       "note": record.get("note") or "", "error": record.get("error") or ""})
+        save_json_file(report, {"scenes": scenes})
+    if logger is not None:
+        logger.info(
+            "focus objects: %s -- %s (%d model(s), %d placement(s))",
+            os.path.basename(target),
+            record["note"] or ("failed: " + str(record["error"])) if not record["ok"]
+            else "placed",
+            len(record.get("models") or []), len(record.get("placements") or []),
+        )
+    return record
+
+
+class ProjectError(RuntimeError):    """The project folder could not be created."""
 
 
 def project_folder_name(when: float | None = None) -> str:
@@ -330,15 +504,23 @@ class ProjectLayout:
         return payload
 
     # -- scenes ----------------------------------------------------------
-    def scene_copy_name(self, source: str) -> str:
+    def scene_copy_name(self, source: str, *, label: str = "") -> str:
         """File name to use inside ``scene/`` for *source*.
 
         Two scenes with the same file name from different folders must not
         overwrite each other, so a name already claimed by a *different* scene gets
         a numeric suffix.  A name claimed by this very file is reused, which is what
         makes a repeated run skip the copy.
+
+        ``label`` names a *variant* of the same source -- the per-focus-object copies
+        are ``<stem>__<label>.blend`` -- and always claims its own name, so a variant
+        is never confused with the plain copy.
         """
         source = normalize_path(source)
+        if label:
+            stem = os.path.splitext(os.path.basename(source))[0]
+            safe = safe_filename(str(label), fallback="focus")
+            return f"{stem}__{safe}.blend"
         known = self.copy_for(source)
         if known:
             return os.path.basename(known)
@@ -361,16 +543,18 @@ class ProjectLayout:
             candidate = f"{stem}_{index}{extension}"
             index += 1
 
-    def stage_scene(self, source: str, *, logger=None) -> str:
+    def stage_scene(self, source: str, *, logger=None, label: str = "") -> str:
         """Copy *source* into ``scene/`` and return the copy's path.
 
         Idempotent: an unchanged copy is reused, so a repeated run does not copy
-        hundreds of megabytes again.
+        hundreds of megabytes again.  With ``label`` the copy is a *variant* of the
+        source (one focus object's own scene) and is refreshed whenever the source is
+        newer, because the source of a variant is the staged base copy.
         """
         source = normalize_path(source)
-        target = os.path.join(self.scene_root, self.scene_copy_name(source))
+        target = os.path.join(self.scene_root, self.scene_copy_name(source, label=label))
         wrote = copy_file(source, target)
-        pair = (source, target)
+        pair = (f"{source}#{label}" if label else source, target)
         if pair not in self.scene_copies:
             self.scene_copies.append(pair)
         if logger is not None:

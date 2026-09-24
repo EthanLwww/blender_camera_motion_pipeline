@@ -84,6 +84,50 @@ from blender_motion_pipeline.utils.version import GENERATOR_VERSION  # noqa: E40
 LOGGER = setup_logging(level=os.environ.get("MP_LOG_LEVEL", "INFO"))
 
 
+def parse_focus_model_spec(spec: str) -> dict:
+    """One ``--focus-model`` value: ``PATH[::OBJECT[::SCALE]]``.
+
+    A focus model is a ``.blend`` file, and for a headless run that is usually the
+    whole story -- so the file is the argument.  The object filter and the scale ride
+    along in the same string because two paired repeatable flags would make the order
+    of the command line significant; everything else (rotation, explicit ids) stays in
+    ``--config``, where it can be written down and checked.
+    """
+    parts = [part.strip() for part in str(spec).split("::")]
+    if len(parts) > 3:
+        raise argparse.ArgumentTypeError(
+            f"{spec!r}: expected PATH[::OBJECT[::SCALE]], so at most two '::' separators"
+        )
+    path = parts[0]
+    if not path:
+        raise argparse.ArgumentTypeError(f"{spec!r}: a focus model needs a .blend path")
+    record = {"id": "", "path": path, "label": "", "object_name": "",
+              "scale": 1.0, "rotation": [0.0, 0.0, 0.0], "enabled": True}
+    if len(parts) > 1 and parts[1]:
+        record["object_name"] = parts[1]
+    if len(parts) > 2 and parts[2]:
+        try:
+            record["scale"] = float(parts[2])
+        except ValueError:
+            raise argparse.ArgumentTypeError(
+                f"{spec!r}: scale {parts[2]!r} is not a number"
+            ) from None
+        if record["scale"] <= 0.0:
+            raise argparse.ArgumentTypeError(f"{spec!r}: scale must be greater than 0")
+    return record
+
+
+def parse_vec3(text: str) -> "list[float]":
+    """``X,Y,Z`` (or ``X Y Z``) -> three floats, for the anchor position."""
+    parts = [part for part in str(text).replace(",", " ").split() if part]
+    if len(parts) != 3:
+        raise argparse.ArgumentTypeError(f"{text!r}: expected three numbers, like 1.0,2.0,0.0")
+    try:
+        return [float(part) for part in parts]
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{text!r}: every value has to be a number") from None
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="motion_pipeline_cli.py",
@@ -132,6 +176,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="do not reuse existing artifacts")
     output.add_argument("--no-sequence-blend", dest="save_sequence_blend", action="store_false", default=None,
                         help="accepted for backwards compatibility; sequence .blend copies were removed")
+    output.add_argument("--keep-reports", dest="keep_reports", action="store_true",
+                        help="also keep validation/log reports for successful sequences")
     output.add_argument("--no-validation-report", dest="save_validation_report",
                         action="store_false", default=None, help="skip validation_report.json")
 
@@ -202,6 +248,39 @@ def build_parser() -> argparse.ArgumentParser:
     composite.add_argument("--duration-max", type=float, default=None, metavar="SECONDS",
                            help="longest sequence length in random mode")
 
+    focus = parser.add_argument_group(
+        "focus objects (the subject an Arc orbits; one axis of the matrix)"
+    )
+    focus.add_argument("--focus-mode", default="", choices=["", "off", "models"],
+                       help="off generates the plain matrix; models places every --focus-model "
+                            "on the scene's anchor and adds it as an axis.  Passing "
+                            "--focus-model implies models")
+    focus.add_argument("--focus-model", action="append", default=[], metavar="PATH[::OBJECT[::SCALE]]",
+                       type=parse_focus_model_spec,
+                       help="a .blend model to place; repeat for several subjects.  OBJECT takes "
+                            "one object out of the file instead of all of them, SCALE scales it")
+    focus.add_argument("--focus-anchor", default="", choices=["", "auto", "object", "numbers"],
+                       help="where the single anchor point of a scene comes from: auto finds the "
+                            "most open spot, object uses --focus-anchor-object, numbers uses "
+                            "--focus-anchor-location")
+    focus.add_argument("--focus-anchor-object", default="", metavar="NAME",
+                       help="the empty that marks the anchor (default MPP_FocusAnchor)")
+    focus.add_argument("--focus-anchor-location", default=None, metavar="X,Y,Z", type=parse_vec3,
+                       help="anchor position in world metres")
+    focus.add_argument("--focus-anchor-clearance", type=float, default=None, metavar="M",
+                       help="free space 'auto' looks for around the anchor, in metres")
+    focus.add_argument("--focus-keep-visible", dest="focus_keep_visible", action="store_true",
+                       default=None,
+                       help="check every sequence that the object really stayed in frame (default)")
+    focus.add_argument("--no-focus-keep-visible", dest="focus_keep_visible", action="store_false",
+                       default=None, help="skip that check and record nothing about it")
+    focus.add_argument("--focus-visible-ratio", type=float, default=None, metavar="R",
+                       help="share of the frames the object has to be in frame for (0-1)")
+    focus.add_argument("--focus-strict", dest="focus_strict", action="store_true", default=None,
+                       help="do not write a sequence whose focus object ends up out of frame")
+    focus.add_argument("--no-focus-strict", dest="focus_strict", action="store_false", default=None,
+                       help="write it anyway and record the failure (default)")
+
     behaviour = parser.add_argument_group("behaviour")
     behaviour.add_argument("--dry-run", action="store_true",
                            help="resolve everything and report the matrix without generating")
@@ -253,6 +332,8 @@ def build_config(args) -> BatchConfig:
         config.batch.resume = bool(args.resume)
     # ``--no-sequence-blend`` is a no-op: sequences are always animation-only, so
     # no per-sequence ``.blend`` is written and nothing needs configuring.
+    if getattr(args, "keep_reports", False):
+        config.batch.keep_reports = True
     if args.save_validation_report is not None:
         config.batch.save_validation_report = bool(args.save_validation_report)
     if args.path_map:
@@ -340,11 +421,36 @@ def build_config(args) -> BatchConfig:
     if config.composite.enabled:
         config.composite.validate()
 
+    # Passing a model is the whole point of the feature, so it turns it on by itself:
+    # a run that names a subject and then generates nothing with it would be a trap.
+    if args.focus_model and not args.focus_mode:
+        config.focus.mode = "models"
+    if args.focus_mode:
+        config.focus.mode = args.focus_mode
+    if args.focus_model:
+        config.focus.models = list(args.focus_model)
+    if args.focus_anchor:
+        config.focus.anchor_mode = args.focus_anchor
+    if args.focus_anchor_object:
+        config.focus.anchor_object = args.focus_anchor_object
+    if args.focus_anchor_location:
+        config.focus.anchor_location = [float(value) for value in args.focus_anchor_location]
+    if args.focus_anchor_clearance is not None:
+        config.focus.anchor_clearance = float(args.focus_anchor_clearance)
+    if args.focus_keep_visible is not None:
+        config.focus.keep_visible = bool(args.focus_keep_visible)
+    if args.focus_visible_ratio is not None:
+        config.focus.visible_ratio = float(args.focus_visible_ratio)
+    if args.focus_strict is not None:
+        config.focus.strict = bool(args.focus_strict)
+    if config.focus.enabled:
+        config.focus.validate()
+
     return config
 
 
-def resolve_entries(args) -> "tuple[list[SceneEntry], list[str]]":
-    """Collect scenes from the CLI, the scene list file and the open file."""
+def resolve_entries(args, config: "BatchConfig | None" = None) -> "tuple[list[SceneEntry], list[str]]":
+    """Collect scenes from the CLI, the scene list file, the config and the open file."""
     entries: "list[SceneEntry]" = []
     warnings: "list[str]" = []
 
@@ -367,6 +473,17 @@ def resolve_entries(args) -> "tuple[list[SceneEntry], list[str]]":
     if args.scenes:
         entries, problems = merge_scene_entries(entries, args.scenes)
         warnings.extend(problems)
+
+    # ``--config`` carries its scenes too (the panel writes them there), so a config
+    # file is enough to describe a whole run instead of having to repeat the paths on
+    # the command line.  Anything given on the command line still wins: the config is
+    # only consulted when nothing else named a scene.
+    if not entries and config is not None and getattr(config, "scenes", None):
+        paths = [str(item.get("path")) for item in config.scenes
+                 if isinstance(item, dict) and item.get("path") and item.get("enabled", True)]
+        if paths:
+            entries, problems = merge_scene_entries(entries, paths)
+            warnings.extend(problems)
 
     if args.include_current:
         import bpy
@@ -513,6 +630,13 @@ def command_run(config: BatchConfig, entries, args) -> int:
         runner.output_root = runner.project_layout.sequence_root
         print(f"project folder: {runner.project_layout.root}")
         print(runner.project_layout.describe(indent="    "))
+    elif _focus_enabled(config):
+        # The models are placed *inside the staged scene copy* -- that is what the
+        # renderer opens, so a bare tree has nowhere to put them and the feature would
+        # silently generate subject-less sequences.
+        print("  PROBLEM: focus objects are placed in the staged scene copy, which "
+              "--sequence-root does not create; use --output-root")
+        return 1
 
     report = runner.run()
     print()
@@ -520,6 +644,24 @@ def command_run(config: BatchConfig, entries, args) -> int:
     if args.report:
         save_json_file(args.report, report.to_dict())
     return 0 if report.ok else 1
+
+
+def _focus_enabled(config: BatchConfig) -> bool:
+    from blender_motion_pipeline.core import focus as focus_objects
+
+    return focus_objects.enabled(getattr(config, "focus", None))
+
+
+def _focus_models(config: BatchConfig):
+    """The focus models a run would use (resolved, existing files only)."""
+    from blender_motion_pipeline.core import focus as focus_objects
+    from blender_motion_pipeline.io.path_utils import parse_path_mappings
+
+    return focus_objects.models_from_section(
+        getattr(config, "focus", None),
+        mappings=parse_path_mappings(config.batch.path_mappings),
+        logger=LOGGER,
+    )
 
 
 def _dry_run_matrix(config: BatchConfig, entries, runner, args=None) -> int:
@@ -536,10 +678,12 @@ def _dry_run_matrix(config: BatchConfig, entries, runner, args=None) -> int:
         return 1
     provider = runner.build_provider()
     variants = character_variants(config.batch.mode, provider, logger=LOGGER)
+    focus_models = _focus_models(config)
+    focus_count = len(focus_models) if _focus_enabled(config) else 1
 
     print(
         f"\ndry run: {len(entries)} scene(s) x {len(library)} motion(s) x "
-        f"{len(variants)} character variant(s)"
+        f"{len(variants)} character variant(s) x {focus_count} focus object(s)"
     )
     if getattr(args, "no_project_layout", False):
         print(f"  sequence root : {to_forward_slashes(config.batch.output_root)}")
@@ -553,6 +697,32 @@ def _dry_run_matrix(config: BatchConfig, entries, runner, args=None) -> int:
         )
     print(f"  templates     : {library.source} ({len(library)})")
     print(f"  provider      : {provider.name} / {provider.status()}")
+    if _focus_enabled(config):
+        focus = config.focus
+        anchor = focus.anchor_mode
+        if anchor == "object":
+            anchor += f" ('{focus.anchor_object or 'MPP_FocusAnchor'}')"
+        elif anchor == "numbers":
+            anchor += f" ({','.join(f'{float(v):g}' for v in focus.anchor_location)})"
+        print(
+            f"  focus         : {len(focus_models)} model(s), anchor {anchor}, "
+            f"keep_visible={focus.keep_visible} ({focus.visible_ratio:g}), "
+            f"{'strict' if focus.strict else 'lenient'}"
+        )
+        for model in focus_models[:6]:
+            detail = f" :: {model.object_name}" if model.object_name else ""
+            if abs(float(model.scale) - 1.0) > 1e-9:
+                detail += f" x{float(model.scale):g}"
+            print(f"      {(model.label or os.path.basename(model.path)):28s}{detail}")
+        if len(focus_models) > 6:
+            print(f"      ... {len(focus_models) - 6} more model(s)")
+        if not focus_models:
+            print("  focus         : PROBLEM: none of the configured model files exist")
+            return 1
+        if getattr(args, "no_project_layout", False):
+            print("  focus         : PROBLEM: --sequence-root writes no scene copy for the "
+                  "models to be placed in; use --output-root")
+            return 1
     motion_count = len(library)
     composite = getattr(config, "composite", None)
     if composite is not None and composite.enabled:
@@ -633,11 +803,11 @@ def _dry_run_matrix(config: BatchConfig, entries, runner, args=None) -> int:
         if not cameras:
             print(f"  NO CAM  : {os.path.basename(entry.path)} has no camera; it would be skipped")
             continue
-        count = len(cameras) * motion_count * len(variants)
+        count = len(cameras) * motion_count * len(variants) * focus_count
         total += count
         print(
             f"  {os.path.basename(entry.path)}: {len(cameras)} camera(s) x {motion_count} motion(s) "
-            f"x {len(variants)} variant(s) = {count} sequence(s)"
+            f"x {len(variants)} variant(s) x {focus_count} focus object(s) = {count} sequence(s)"
         )
     print(f"\nwould generate {total} sequence(s)")
     return 0
@@ -682,7 +852,7 @@ def main(argv=None) -> int:
         save_config_file(args.save_config, config)
         LOGGER.info("effective configuration written to %s", to_forward_slashes(args.save_config))
 
-    entries, warnings = resolve_entries(args)
+    entries, warnings = resolve_entries(args, config)
     for warning in warnings:
         LOGGER.warning("%s", warning)
     for entry in entries:

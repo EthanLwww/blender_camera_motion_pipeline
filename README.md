@@ -25,13 +25,15 @@ uses (see [Version compatibility](#version-compatibility)).
 7. [Configuration reference](#configuration-reference)
 8. [Motion templates](#motion-templates)
 9. [Compound shots](#compound-shots)
-10. [Camera validation and auto-search](#camera-validation-and-auto-search)
-11. [Characters](#characters)
-12. [Remote / render-farm notes](#remote--render-farm-notes)
-13. [Testing](#testing)
-14. [Architecture](#architecture)
-15. [Version compatibility](#version-compatibility)
-16. [Known limitations](#known-limitations)
+10. [Camera region](#camera-region)
+11. [Focus objects](#focus-objects)
+12. [Camera validation and auto-search](#camera-validation-and-auto-search)
+13. [Characters](#characters)
+14. [Remote / render-farm notes](#remote--render-farm-notes)
+15. [Testing](#testing)
+16. [Architecture](#architecture)
+17. [Version compatibility](#version-compatibility)
+18. [Known limitations](#known-limitations)
 
 ---
 
@@ -45,11 +47,14 @@ uses (see [Version compatibility](#version-compatibility)).
 | Camera auto-search | when validation fails | spherical search + weighted scoring |
 | Sequence generation | panel **or** CLI | independent, renderable `.blend` per combination |
 | Video rendering | `render/render_sequences.py` | MP4 + JSON + camera-trajectory TXT per sequence |
+| Focus objects (optional) | panel **Focus object** | a model placed on the scene's single anchor point; an `Arc` orbits it, every other motion just has it in frame |
 
 The matrix that gets generated is
 **scene × motion template × camera × character × character animation**, and the
 character dimension collapses to a single "no character" entry when character
-handling is off.
+handling is off. With `focus.mode = models` it gains one more axis —
+**scene × camera × motion × focus object** — and the numbered folders of one motion
+keep counting across it, with no per-object sub-folder.
 
 ---
 
@@ -95,8 +100,8 @@ copied next to the package.
 Press <kbd>N</kbd> in the 3D viewport and open the **Motion Pipeline** tab.
 
 The panels are ordered for the workflow: **Quick actions**, Scenes, Character,
-Motion templates, Camera validation, Sequence output, Local render, Actions,
-Status.
+Motion templates, Camera validation, Sequence output, **Camera region**, **Focus object**,
+Local render, Actions, Status.
 
 ### Quick actions
 
@@ -257,6 +262,23 @@ render report and the per-sequence render log both name the winner
 (`resolution_source: sequence | command line | scene`), so a surprise size is
 traceable instead of mysterious.
 
+### Focus object
+
+Collapsed by default, and off until **Focus objects** is switched from `No focus
+objects` to `One per model` (see [Focus objects](#focus-objects)).
+
+* **Models (.blend)** — **Model file** + the picker adds one model; **Model folder**
+  scans a folder for `.blend` models. The **Focus models (N)** list shows each row
+  with an enable tick, the model name and (when set) the object it takes, with
+  **move up / move down / remove / clear** under it. The selected row opens
+  **Name**, **Object**, **Scale** and **Rotation**.
+* **Anchor point (one per scene)** — `Auto (open spot)` / `From object` /
+  `Numbers`. **Auto place anchor** creates or moves an empty — `MPP_FocusAnchor` by
+  default — at the most open spot of the scene (with **Anchor clearance** metres of
+  free space around it, and it says so when it finds less).
+* **Arc shots** — **Keep the subject in frame**, **Required visibility** and
+  **Skip shots that lose the subject**.
+
 ### Local render
 
 Renders generated sequences to video **without leaving Blender**, and without
@@ -353,6 +375,32 @@ generation problem, `2` bad configuration/inputs.
 `--no-sequence-blend` is still accepted and does nothing: sequences never write a
 scene copy any more, so there is nothing to switch off.
 
+Focus objects have a full set of flags too (`--focus-model`, `--focus-anchor*`,
+`--focus-strict`, ...) — see [Focus objects](#focus-objects); `--dry-run` counts that
+axis and lists the models.
+
+### The 41-move batch skill
+
+`skills/generate-41-shots/` packages the whole *folder of scenes → sequence tree* flow as a
+skill that runs on any machine with Blender plus this repository, and it refuses to guess
+the two numbers that are a judgement about the room:
+
+```bash
+python skills/generate-41-shots/inspect_scene.py --scenes /data/scenes --report /tmp/inspect.json
+python skills/generate-41-shots/make_run_config.py --scenes /data/scenes --output /data/run_0924 \
+    --items /data/item --region "-2.0,0.01,2.95:9.6,5.3,5.7" --anchor "-1.4,-1.2,0.02" --run
+python skills/generate-41-shots/verify_run.py --run /data/run_0924 \
+    --expect-cameras 3 --expect-motions 41 --expect-focus 2 --expect-sequences 246
+```
+
+`inspect_scene.py` measures the scene (interior bounds, floor, what each camera can
+actually see, orbit-feasible spots for the subject); `make_run_config.py` writes the run
+config and runs the CLI (`--region`/`--region-object` and `--anchor`/`--anchor-object` are
+required, `--scenes` walks a folder recursively, `--items`/`--item` list the focus
+models); `verify_run.py` reads the finished tree with no Blender and no add-on import and
+reports the counts, the render settings, the region stages and how much of each arc shot
+shows its subject. `SKILL.zh-CN.md` is the same document in Chinese.
+
 ---
 
 ## Headless rendering
@@ -416,7 +464,6 @@ blender -b -P render/render_sequences.py -- \
 # resolution when the sequence fixes one (see "Sequence output").
 blender -b -P render/render_sequences.py -- \
     --input-root "D:\generated" --output-root "D:\render_output"
-
 # Map asset paths stored on the authoring machine onto the render node
 blender -b -P render/render_sequences.py -- \
     --input-root /mnt/gen --output-root /mnt/out \
@@ -433,6 +480,36 @@ built as `blender -b -P render_sequences.py -- --input ...` — Blender parses i
 own options up to the standalone `--`, so anything before it (an `--input` that
 belongs to the script) is read as a file name and the worker silently renders
 nothing.
+
+**The engine a sequence was generated with is a default, not a lock.** What
+`sequence_config.json` records under `render` is used when the command line says
+nothing:
+
+| Precedence | Source |
+|---|---|
+| 1 (highest) | the command line / the panel's Local render: `--engine`, `--device`, `--samples`, `--denoise`, `--resolution-x/y`, `--resolution-percentage`, `--fps` |
+| 2 | the sequence's own record: `engine` and `samples` always; the **resolution only** when the generator was told to stamp one (`resolution_explicit`) |
+| 3 | the loaded scene's own settings |
+
+So "generate with EEVEE, render on the farm with Cycles" is ordinary use:
+
+```bash
+render-all.sh <seq> <out> --engine CYCLES --device GPU --samples 64 --denoise --persistent-data
+```
+
+Measured on one sequence recorded as `BLENDER_EEVEE`: with no flags it rendered
+`BLENDER_EEVEE` / 32 samples, and with `--engine CYCLES --device CPU --samples 4` it
+rendered `CYCLES` / 4 samples — both wrote a video. **The engine and sample count
+actually used are written into the `render` block of the `<sequence>.json` next to the
+video**, so an overridden run is still self-describing. `render-all.sh` also retries a
+failed sequence with another engine (EEVEE → CYCLES → WORKBENCH) unless `--no-fallback`.
+
+Two traps: `--resolution-percentage` can land on an **odd** edge (25% of 180 is 45) and
+H.264 needs even width and height, so Blender fails with `height not divisible by 2` —
+give exact `--resolution-x/y` or pick a percentage that divides cleanly. And the render
+node's image has to carry the current renderer: flags like `--engine` are parsed by the
+`render_sequences.py` *inside* the image, so an image that has not been rebuilt needs the
+RUNBOOK's instance toolkit plus `MPP_RENDERER`.
 
 Workers only pay off when the bottleneck is per-process rather than per-GPU.
 EEVEE renders one frame on the GPU, so several workers on one GPU compete for the
@@ -542,6 +619,28 @@ into `<dir>`, without the project folder, for scripted runs that want exactly th
 
 Sequence numbering restarts at `sequence_000001` inside each motion folder, so a
 motion folder is self-contained and re-running one motion never renumbers another.
+
+**Generation packs the external files of every scene copy.** As soon as a copy lands
+in `scene/`, `render/pack_textures.py` runs on it in a throwaway Blender process:
+textures, fonts and movie clips are embedded into that `.blend`, and both generation
+and later renders use the self-contained copy. The result lands in
+`pack_report.json` in the project root (per scene: what was packed, what could not be
+found, size change, seconds) and `project.json` carries an `asset_pack` summary; each
+scene logs one `scene assets: <name> -- ... (N packed, M missing)` line.
+
+Files that no longer exist on disk **cannot** be packed — that is reported as a problem
+during generation (with the first few names) instead of surfacing hours into a render
+as a silently missing texture. `scene/` only ever holds `.blend` files; the report goes
+to the project root.
+
+With focus objects on, `scene/` also holds **one copy per focus model**
+(`<name>__<model>.blend`), and each of those copies carries **exactly one** subject:
+a shot has one subject, so the file a render node opens says which.  The model stays
+visible and its name is recorded in the scene as `mpp_focus_objects`, so a renderer that
+predates the feature still films the right thing; the generator and the renderer still
+switch visibility per sequence, which is what keeps a subject-less shot honest.  The run
+writes `focus_report.json` beside `pack_report.json` in the project root (per copy: the
+anchor, whether that model loaded, and its placement's world box).
 
 **A sequence is animation-only.** It stores the camera animation it generated
 instead of a copy of the scene — ~150 KB instead of hundreds of MB — and the
@@ -727,6 +826,15 @@ One JSON document drives both the panel and the CLI. See
     "video_format": "mp4", "codec": "H264", "constant_rate_factor": "HIGH",
     "trajectory_mode": "all_frames", "trajectory_step": 1
   },
+  "focus": {
+    "mode": "off",
+    "models": [{"id": "", "path": "E:/models/chair.blend", "label": "chair",
+                "object_name": "", "scale": 1.0, "rotation": [0.0, 0.0, 0.0],
+                "enabled": true}],
+    "anchor_mode": "auto", "anchor_object": "MPP_FocusAnchor",
+    "anchor_location": [0.0, 0.0, 0.0], "anchor_clearance": 0.5,
+    "keep_visible": true, "visible_ratio": 0.95, "strict": false
+  },
   "scenes": [{"path": "E:/scenes/room001.blend", "enabled": true}]
 }
 ```
@@ -893,6 +1001,48 @@ across 16 families: `dolly_in`, `dolly_out`, `fixed`, `hitchcock`, `pan_left`,
 `hitchcock` which has 10). `--motion-filter` / the panel's **Motion filter**
 selects a subset by id or glob.
 
+### The 41 dataset moves
+
+`templates/camera_motion_templates_41.json` is a second motion-template document:
+the **41** moves of the dataset shot list — **17** single, **7** simultaneous,
+**13** two-phase and **4** three-phase. It has the shape of any other document, so
+the parser, the library, the panel and the probes treat it like the reference one,
+and it is loaded the same way (`--templates`, or the panel's **Motion templates
+path**).
+
+| Convention | Value |
+|---|---|
+| Timeline | keys are **absolute frames** at 24 fps and the shot is 6 s, frames **0..144**; a two-phase move splits at frame 72 and a three-phase one at 48/96, and a phase with no component is a **hold** |
+| Ids | `<kind>_<move>` — `single_arc_cw`, `sim_dolly_in__tilt_up`, `seq_pan_left__tilt_up`, `tri_dolly_in__static__dolly_out`. The kind prefix is load-bearing: the list has both a simultaneous and a sequential "pan left + tilt up" |
+| Every entry | `dataset_key` (the original `S01_...` key), `cap_zh`, `camera_sentence`, `targets`, `tier`, `group`, `moves` (type, direction, phase) |
+
+| Move | Nominal amplitude over the 6 s shot |
+|---|---|
+| Dolly In / Out | 3.0 m forward / backward |
+| Truck Left / Right | 2.0 m |
+| Crane Up / Down | 2.0 m |
+| Pan Left / Right | 45 deg |
+| Tilt Up / Down | 20 deg |
+| Roll CW / CCW | 25 deg |
+| Zoom In / Out | 35 → 70 mm / 35 → 18 mm |
+| Arc CW / CCW | a 90 deg orbit around a subject 4 m ahead |
+
+The keys are written in the same camera-local Blender coordinates as every other
+template (`location` is `[right, up, back]`, so `-Z` is forward). An `Arc`'s keys sit
+on the circle that keeps a subject 4 m ahead centred, with the yaw following the
+orbit angle — the convention `atomic_motion_templates.json` uses too — and with a
+**focus object** the generator re-bakes that orbit around the object itself: the circle
+is centred on it, the camera is aimed at it on every frame, and the sweep and timing stay
+the template's. The camera's own distance to the subject is tried first; when the room
+cannot hold that circle (a 7 m orbit inside a 5 m bedroom drives the camera through a
+wall) the same circle is replayed at the nearest distance that passes validation, stays
+inside the camera box and keeps the subject in frame — the record says so
+(`focus.radius_source`, `focus.radius_attempts`), and a camera-search candidate that
+loses the subject is refused rather than accepted. The amplitudes are *nominal*: with the
+region box on, translation is scaled to the scene, while angles and focal length never
+are. Regenerate it with `python tests/make_41_templates.py` (`--verify-jsonl
+<41template.jsonl>` cross-checks it against the source shot list row by row).
+
 ---
 
 ## Compound shots (spatio-temporal)
@@ -984,6 +1134,154 @@ frame ranges, atom rates, seed) is also recorded in the sequence JSON's
 and compares it with the recorded poses frame by frame -- a plan-driven tree needs
 no template document at all.
 
+
+---
+
+## Camera region
+
+An optional box the camera has to stay inside. It has its own sidebar panel
+(**Camera region**, below *Sequence output*); the Sequence output panel then repeats the
+current box and verdict, because the box is what gets written into every
+`sequence_config.json`.
+
+The box is used by atomic and compound shots as a
+**redraw** problem (a graded L0–L5 ladder: leave a good plan alone, redraw the segment
+that left, redraw the plan, prefer slower same-family atoms, split long segments,
+then fail honestly) and by fixed templates as a **fit** problem.
+
+A fixed template is never redrawn — it is one shot, and its shape, timing and angles
+*are* the shot. Its translation amplitude is multiplied by one factor so the whole
+path stays inside the box; because `position(s) = first frame + s × offset` is affine
+in `s`, the answer is exact and needs no search. Angles and focal length are never
+scaled (they cannot leave the scene), and a shot that already fits is used unchanged.
+
+| Recorded in `region` | Meaning |
+|---|---|
+| `stage: "fit"` | the fit ran: one uniform factor was computed and applied |
+| `stage: "fit-failed"` | even the floor does not fit (the first frame is outside the box, which no scaling can fix) |
+| `scale` | the factor used; `1.0` means the template was already inside the box and is untouched |
+| `ok`, `frames`, `exit_frames`, `max_excess_m` | the post-fit verdict and the usual counts |
+
+A re-centred focus orbit is the exception: its circle is centred on the subject, so
+shrinking the offsets would slide the camera off it. It is **measured and reported**
+instead (`stage: "focus-orbit"`, `scale: 1.0`) and `region.strict` decides whether the
+sequence is kept — the same skip contract the ladder uses. See
+[Focus objects](#focus-objects).
+
+---
+
+## Focus objects
+
+Give a scene a **subject**: one or more `.blend` models are placed on the scene's single
+**anchor point**, an `Arc` shot is made to **orbit** the object, and every other motion
+is left exactly as it was, with the object simply in frame. It is off by default
+(`focus.mode = off`) and stays out of the code paths when it is.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `mode` | `off` | `off` / `models` |
+| `models` | `[]` | one entry per model: `path`, `label`, `object_name`, `scale`, `rotation`, `enabled` |
+| `anchor_mode` | `auto` | `auto` (the most open spot of the scene) / `object` (`anchor_object`) / `numbers` (`anchor_location`) |
+| `anchor_object` | `""` | read as `MPP_FocusAnchor` (the empty the panel button creates) |
+| `anchor_location` | `[0,0,0]` | anchor point in world metres (`numbers`) |
+| `anchor_clearance` | `0.5` | free space `auto` looks for around the anchor, in metres |
+| `keep_visible` | `true` | check every sequence that the subject really stayed in frame |
+| `visible_ratio` | `0.95` | share of the frames that counts as "in frame" |
+| `strict` | `false` | do not write a sequence whose subject ended up out of frame |
+
+**One anchor point per scene.** `auto` starts at the centre of the scene's bounding
+box, drops to the floor under it and walks outwards over a small spiral until it finds
+a spot with `anchor_clearance` metres of free space around it (26 ray directions); a
+centre buried in a wall, a table or a train therefore still yields a usable anchor.
+When nothing that open exists it takes the most open spot it did find and **says what
+it measured**, and a scene it cannot measure at all falls back to the bounding-box
+centre and says so. `object` takes the named object (falling back to the automatic
+position, with a note, when it is not in the scene) and `numbers` takes the typed
+coordinates. A model is placed by its footprint centre on the anchor and its
+bounding-box base at the anchor's height, after `rotation`/`scale`.
+
+**The object lives in the staged scene copy, and every object gets its own copy.** A
+sequence ships the camera animation and the renderer replays it onto the copy in
+`scene/`, so an object that is not inside that copy cannot be in the picture: the models
+are placed while the copies are staged (`render/place_focus_objects.py`, a throwaway
+Blender process next to `pack_textures.py`). N focus objects produce N extra copies
+(`<scene>__<model>.blend`), each holding **exactly one** subject — one shot, one subject,
+and the file the render node opens says which. The model stays visible and is registered
+in the scene as `mpp_focus_objects`; the generator and the renderer still switch
+visibility per sequence (`focus.apply_visibility`), which is what makes a subject-less
+shot and a copy with several objects behave. Two consequences are deliberate: a renderer
+that does not know about the feature still films the right thing, and the feature
+therefore needs a project folder (the panel's and the CLI's normal path) — a bare
+`--sequence-root` run has no copy to put an object into. The cost is disk: one scene copy
+per subject (the reference bedroom's 113 MB became 120–138 MB per variant).
+
+**The matrix gains one axis.** Sequences still land in
+`<scene>/<motion>/sequence_NNNNNN` with **no per-object folder**: the numbering
+restarts per motion folder and keeps counting across the objects, and every sequence
+records which object it was generated for, in `sequence_config.json` → `focus` and in
+the sidecar's `extra.focus`:
+
+| `sequence_config.json` → `focus` | Contents |
+|---|---|
+| `object` / `label` / `model_path` | which subject this sequence is of (the configured id, its label, its file) |
+| `objects` | the object names the renderer has to show (the only thing it switches on) |
+| `anchor` / `center` | the anchor point and the subject's world box centre |
+| `visibility` | `ok`, `visible_ratio`, `visible_frames` / `frames` |
+| `orbit` | `radius_m`, `sweep_deg`, `direction` of the re-centred orbit |
+
+With `focus.mode = off` the block is `{}`, and so is the block of a sequence that has
+no subject (a single move, a compound): the renderer hides **every** focus object for
+those, which is what keeps the previous sequence's subject out of the shot when a whole
+tree renders in one Blender process.
+
+**Only an `Arc` is re-centred.** The template's sweep and direction are kept verbatim
+(`sweep_deg` and `direction` are read from it), but the circle is re-centred on the
+object at the camera's **real horizontal distance** and the camera is aimed at it —
+that aim is folded into the **base pose**, so the recorded trajectory, the validation
+and the video all agree. The keys are resampled at 3 deg a step (a 3 mm chord error on
+an 8 m orbit, against a measured 68 mm when only the template's own 15 deg keys were
+used). A camera closer than 0.25 m to the subject horizontally cannot orbit it and is
+told so; a motion that turns but is not an orbit (a pan, a hitchcock) is left completely
+alone and the object is still in frame.
+
+**Verification and honesty.** `keep_visible` (on by default) checks per sequence that
+the object really stayed in frame — the box centre and at least one corner inside the
+frustum counts as *visible*, all eight corners as *fully visible*, and both counts are
+recorded — and `visible_ratio` (0.95 by default) is the threshold. A shot that misses
+it is reported in full ("N of M frames visible, needing 95%"), and `focus.strict` skips
+it instead of writing it, the same contract as `region.strict`. Frames where the camera
+ends up inside the object also count against it.
+
+Focus objects are scriptable too — everything the panel can say, the CLI can say:
+
+```bash
+blender -b --factory-startup -P motion_pipeline_cli.py -- \
+  --scenes room.blend --output-root "D:\projects" \
+  --templates templates/camera_motion_templates_41.json --motion-filter "single_arc_*" \
+  --focus-model "D:\models\chair.blend::Chair::1.2" --focus-model "D:\models\lamp.blend" \
+  --focus-anchor auto --focus-anchor-clearance 0.6 \
+  --no-focus-keep-visible
+```
+
+| Flag | What it does |
+|---|---|
+| `--focus-mode off\|models` | the master switch; passing `--focus-model` implies `models` |
+| `--focus-model PATH[::OBJECT[::SCALE]]` | repeatable; `OBJECT` takes one object out of the file, `SCALE` scales the model |
+| `--focus-anchor auto\|object\|numbers` | where the anchor comes from |
+| `--focus-anchor-object NAME` | the empty used by `object` (default `MPP_FocusAnchor`) |
+| `--focus-anchor-location X,Y,Z` | the position used by `numbers` |
+| `--focus-anchor-clearance M` | the free space `auto` looks for |
+| `--focus-keep-visible` / `--no-focus-keep-visible` | the per-sequence visibility check (on by default) |
+| `--focus-visible-ratio R` | the threshold for it (default `0.95`) |
+| `--focus-strict` / `--no-focus-strict` | skip a sequence that loses the subject (default: record it) |
+
+`--dry-run` counts the focus axis and lists the models (`N model(s), anchor …, keep_visible=…`).
+A malformed `--focus-model` (no path, a scale that is not a number, too many `::`) is an
+argparse usage error (exit 2), and `--focus-mode models` with no usable model — or focus
+together with `--sequence-root`, which writes no scene copy to place the models in — is
+refused *before* the run instead of quietly generating subject-less sequences. Rotation and
+explicit ids stay in `--config` / the panel; every setting travels in the `BatchConfig`
+(config file, panel export/import, remembered settings, `batch_config.json`).
 
 ---
 
@@ -1119,15 +1417,16 @@ not been produced from real MetaHuman or Blender rigs here.** See
 ## Testing
 
 ```bash
-# Everything (pure suites + Blender suites) — 241 cases
+# Everything (pure suites + Blender suites) — 294 cases
 blender -b -P blender_camera_motion_pipeline/tests/run_blender_tests.py
 
-# Pure suites only, no Blender required (144 cases)
+# Pure suites only, no Blender required (177 cases)
 python blender_camera_motion_pipeline/tests/run_blender_tests.py
 
 # Individual suites (each one also runs on its own)
 blender -b -P blender_camera_motion_pipeline/tests/test_blender_integration.py
 blender -b -P blender_camera_motion_pipeline/tests/test_animation_api.py
+blender -b -P blender_camera_motion_pipeline/tests/test_focus_objects.py
 python blender_camera_motion_pipeline/tests/test_project_layout.py
 
 # Probes are standalone too; tests/_boot.py makes the add-on importable whatever
@@ -1180,26 +1479,40 @@ blender -b -P blender_camera_motion_pipeline/tests/probe_animation_only_equivale
 `MP_KEEP_E2E=1` keeps the end-to-end tree; `MP_TEST_TRACEBACK=1` prints full
 tracebacks.
 
+Both entry points are worth running: `run_blender_tests.py` puts every suite in **one**
+Blender process, while the suites also run one at a time as above. Cases rebuild the
+fixtures they need (a model or scene in the temp folder that another throwaway Blender
+process removed is recreated on demand), so both entry points should come back green.
+
 ### Results on this machine (Blender 5.2.2 LTS, Windows)
 
 | Suite | Cases | Result |
 |---|---|---|
 | `test_path_utils` | 16 | pass |
-| `test_config` | 18 | pass |
-| `test_project_layout` | 15 | pass |
+| `test_config` | 19 | pass |
+| `test_project_layout` | 14 | pass |
 | `test_motion_templates` | 33 | pass |
 | `test_motion_composite` | 23 | pass |
+| `test_region` | 14 | pass |
+| `test_region_planner` | 10 | pass |
+| `test_region_wiring` | 9 | pass |
 | `test_camera_validation` | 39 | pass |
-| `test_animation_api` | 10 | pass |
+| `test_animation_api` | 12 | pass |
 | `test_addon_lifecycle` | 10 | pass |
 | `test_render_workflow` | 18 | pass |
-| `test_blender_integration` | 59 | pass |
-| **Total** | **241** | **pass** |
+| `test_focus_objects` | 16 | pass (includes the CLI flags and the renderer's show/hide) |
+| `test_blender_integration` | 61 | pass |
+| **Total** | **294** (177 pure + 117 Blender) | 294 pass in the combined run |
 
-`tests/static_check.py` also reports no unused imports or leftover debug markers
-across every Python file in the package, and one integration case drives every
-panel's `draw()` against a stub layout — a panel that reads a property which no
-longer exists would otherwise only fail when a user opens the sidebar.
+The pure suites (177 cases) pass either way — that is the part of the suite that needs
+no Blender, so it is also the part a machine without one can run. The Blender suites are
+still being extended, so the case count moves.
+
+`tests/static_check.py` scans every Python file for unused imports and leftover debug
+markers and guards both READMEs against encoding damage — `U+FFFD`, and any CJK
+character in this English document. One integration case drives every panel's `draw()`
+against a stub layout — a panel that reads a property which no longer exists would
+otherwise only fail when a user opens the sidebar.
 
 End-to-end acceptance: **10/10 stages**
 
@@ -1215,7 +1528,7 @@ End-to-end acceptance: **10/10 stages**
 10. `--list` enumerates sequences and their state.
 
 The add-on was also installed into a real Blender add-ons folder and verified to
-enable, expose all 19 operators and 8 panels, discover and pre-fill the template
+enable, expose all 26 operators and 10 panels, discover and pre-fill the template
 document (80 templates), and disable cleanly.
 
 Coverage includes the brief's edge cases: missing scene path, scene without a
@@ -1240,6 +1553,8 @@ blender_camera_motion_pipeline/
 ├── motion_pipeline_cli.py headless generation CLI
 ├── templates/             the motion template documents (data, not code)
 │   ├── camera_motion_templates.json       the 80-template reference set
+│   ├── camera_motion_templates_41.json    the 41 dataset moves (see Motion templates)
+│   ├── atomic_motion_templates.json       the 49-entry atomic vocabulary
 │   ├── camera_motion_templates_light.json 17-template subset
 │   ├── camera_motion_templates_test.json  one-template smoke set
 │   └── *.unreal_backup.json               pre-migration Unreal originals
@@ -1254,6 +1569,8 @@ blender_camera_motion_pipeline/
 │   ├── blender_context.py camera snapshots, geometry harvest, restore
 │   ├── sequence_generator.py one sequence: validate -> search -> bake -> write
 │   ├── batch_runner.py scenes x motions x cameras x characters
+│   ├── focus.py the focus subject: anchor, orbit retarget, visibility, registry
+│   ├── region.py the camera box: metrics and the exact translation fit
 │   ├── project.py the slim (data-only) project folder a run writes
 │   ├── camera_animation.py the animation payload + how it is replayed
 │   ├── sequence_manager.py read-only view of the output tree
@@ -1263,6 +1580,7 @@ blender_camera_motion_pipeline/
 │   ├── scene_context.py     MeshSnapshot / CameraSnapshot / ray casters
 │   ├── camera_validator.py clipping, occlusion, framing, jumps, scoring
 │   ├── camera_search.py candidate generation, aim, spherical search
+│   ├── region_planner.py    the L0-L5 re-draw ladder for plans
 │   └── camera_export.py trajectory TXT + JSON sidecars
 ├── character/             pluggable character support
 │   ├── base_provider.py interface, descriptors, variant expansion
@@ -1277,6 +1595,7 @@ blender_camera_motion_pipeline/
 ├── render/
 │   ├── render_sequences.py standalone headless renderer
 │   ├── pack_textures.py    pack a scene copy's external files into it
+│   ├── place_focus_objects.py stage the focus models into a scene copy
 │   ├── render_runner.py panel render driver (child Blender processes)
 │   └── metadata_exporter.py JSON + trajectory writers for the renderer
 ├── utils/
@@ -1371,6 +1690,23 @@ Requires Blender **3.6+**; verified on **5.2.2**. No third-party Python packages
     samples on an RTX 4060 Laptop (~99% GPU utilisation, 4.2 GB VRAM resident, so
     it is GPU-bound rather than misconfigured). Budget render time from
     `tests/probe_render_cost.py` before starting a batch.
+12. **Focus objects need a staged project copy — one per subject.** The models are baked
+    into copies in `scene/` (`<scene>__<model>.blend`, one subject each, visible and
+    registered as `mpp_focus_objects`) because a sequence ships the camera animation
+    only, so a bare `--sequence-root` run has nowhere to put an object and the axis is
+    empty there. A run pays one scene copy per subject in disk. The object is placed on
+    the anchor by its **footprint centre** and its bounding-box base, and only the
+    objects the model file actually brings in are registered — a model that
+    contributes nothing is reported and skipped rather than becoming a folder of
+    subject-less sequences.
+13. **An arc retarget applies to fixed templates, not to compound plans.** A
+    compound or atomic plan keeps its own arc (which assumes the nominal subject
+    distance), and `Arc` is recognised the way the document spells it (`type` in the
+    template's parameters, or an id starting with `arc`). A re-centred orbit that
+    leaves the region box is **reported** (`stage: "focus-orbit"`) rather than
+    shrunk — its radius is the camera's distance to the subject, so scaling the
+    amplitude would slide the camera off it — and `region.strict` decides whether
+    that sequence is kept.
 
 ---
 

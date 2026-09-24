@@ -30,6 +30,8 @@ from ..utils.logging_utils import get_logger
 from ..utils.task_control import TaskCancelled, TaskController
 from ..utils.version import GENERATOR_VERSION, generator_stamp
 from . import blender_context as bctx
+from . import focus as focus_objects
+from .project import FOCUS_REPORT, PACK_REPORT, pack_scene, place_focus_models
 from .scene_loader import (
     SceneEntry,
     missing_scene_entries,
@@ -221,6 +223,15 @@ class BatchRunner:
         self.entries: "list[SceneEntry]" = list(scene_entries or [])
         self.camera_selection = camera_selection
         self._provider = provider
+        #: One ``pack_scene`` record per staged scene copy (what generation embedded).
+        self.asset_packs: "list[dict]" = []
+        #: One ``place_focus_models`` record per staged scene copy (when focus is on).
+        self.focus_placements: "list[dict]" = []
+        #: ``{base scene copy: [(model, variant entry), ...]}`` -- one scene copy per
+        #: focus object, each holding exactly that subject.
+        self.focus_variants: "dict" = {}
+        self._focus_models = None
+        self._mappings = None
 
     # -- setup -----------------------------------------------------------
     def stage_scenes(self) -> "list[str]":
@@ -230,10 +241,17 @@ class BatchRunner:
         shipped project self-contained: the sequences are generated from the exact
         file that ships beside them, and each sequence can record where that file
         lives relative to the project root.
+
+        With focus objects on, each model gets **its own copy** of the scene holding
+        exactly one subject (``scene/<name>__<model>.blend``).  Putting every model in
+        one copy and switching visibility per sequence would leave a scene that contains
+        several subjects, which is not what a shot is supposed to be: one scene, one
+        subject, and the file a render node opens says exactly which.
         """
         if self.project_layout is None:
             return []
         problems: "list[str]" = []
+        models = self.focus_models()
         for entry in self.entries:
             if getattr(entry, "original_path", ""):
                 continue  # already staged by an earlier call
@@ -244,7 +262,118 @@ class BatchRunner:
                 continue
             entry.original_path = entry.path
             entry.path = copy
+            pack_record = self.pack_scene_copy(copy)
+            if pack_record.get("missing"):
+                names = [
+                    os.path.basename(str(item.get("path") or item))
+                    for item in (pack_record["missing"] or [])[:5]
+                ]
+                problems.append(
+                    "scene %s still points at %d file(s) that no longer exist (%s)"
+                    "-- they cannot be packed; the render will fall back to defaults "
+                    "for them" % (os.path.basename(copy), len(pack_record["missing"]),
+                                  ", ".join(names))
+                )
+            variants = []
+            for model in models:
+                variant = self._stage_focus_variant(copy, model, problems)
+                if variant is not None:
+                    variants.append((model, variant))
+            self.focus_variants[copy] = variants
         return problems
+
+    def _stage_focus_variant(self, base_copy: str, model, problems: "list[str]"):
+        """One scene copy per focus model, holding that model and nothing else."""
+        from .scene_loader import SceneEntry
+
+        try:
+            # Copied from the *packed* base copy, so the variant starts self-contained
+            # and its own pack pass has nothing left to embed.
+            variant_path = self.project_layout.stage_scene(
+                base_copy, logger=self.logger, label=model.id
+            )
+        except Exception as exc:  # noqa: BLE001 - reported like every other staging problem
+            problems.append(
+                f"scene {os.path.basename(base_copy)}: the copy for focus object "
+                f"{model.id!r} could not be staged ({exc})"
+            )
+            return None
+        record = self.place_focus_models(variant_path, models=[model])
+        if record is not None and not record.get("ok"):
+            problems.append(
+                "scene %s: focus object %r could not be placed (%s)"
+                % (os.path.basename(variant_path), model.id,
+                   record.get("error") or "no model loaded")
+            )
+        self.pack_scene_copy(variant_path)
+        variant = SceneEntry(path=variant_path)
+        variant.original_path = base_copy
+        return variant
+
+    def focus_models(self):
+        """The focus models this run will generate for (empty when the feature is off)."""
+        section = getattr(self.config, "focus", None)
+        if not focus_objects.enabled(section):
+            return []
+        if self._focus_models is None:
+            self._focus_models = focus_objects.models_from_section(
+                section, mappings=self._path_mappings(), logger=self.logger
+            )
+            if not self._focus_models:
+                self.logger.warning(
+                    "focus.mode is 'models' but no configured model file exists; "
+                    "the run continues without focus objects"
+                )
+        return list(self._focus_models)
+
+    def _path_mappings(self):
+        if self._mappings is None:
+            self._mappings = parse_path_mappings(self.config.batch.path_mappings)
+        return self._mappings
+
+    def place_focus_models(self, path: str, *, models=None) -> "dict | None":
+        """Place focus models inside a staged copy (``None`` when there is nothing to place).
+
+        ``models`` defaults to every configured model, which is what a single-copy run
+        wants; the per-subject staging path passes exactly one, so the copy ends up
+        holding exactly one focus object.
+        """
+        if models is None:
+            models = self.focus_models()
+        if not models:
+            return None
+        section = self.config.focus
+        record = place_focus_models(
+            path,
+            models,
+            anchor=focus_objects.anchor_from_section(section),
+            logger=self.logger,
+            report=os.path.join(self.project_layout.root, FOCUS_REPORT)
+            if self.project_layout is not None else "",
+        )
+        self.focus_placements.append(record)
+        return record
+
+    def pack_scene_copy(self, path: str) -> dict:
+        """Embed the external files a staged copy needs, so the project carries them.
+
+        Packing happens right after the copy is staged and *before* generation, so the
+        sequences are generated from the same self-contained file that ships with the
+        project.  Failures are recorded, never fatal: a scene whose assets are gone can
+        still be rendered, just with Blender's fallback for the missing files.
+        """
+        try:
+            record = pack_scene(
+                path, logger=self.logger,
+                report=os.path.join(self.project_layout.root, PACK_REPORT)
+                if self.project_layout is not None else "",
+            )
+        except Exception as exc:  # noqa: BLE001 - reported like any other problem
+            record = {"path": path, "ok": False, "packed": [], "missing": [],
+                      "note": "", "error": str(exc), "packed_count": 0, "missing_count": 0}
+            self.logger.warning("scene assets could not be packed: %s", exc)
+        self.asset_packs.append(record)
+        return record
 
     def preflight(self) -> "list[str]":
         """Return configuration problems that would make the run meaningless."""
@@ -392,6 +521,19 @@ class BatchRunner:
             outcome.elapsed_seconds = time.time() - started
             return outcome
 
+        # Each focus object has its own copy of this scene, holding exactly that
+        # subject (staged before generation).  A model whose copy could not be staged
+        # never becomes a folder full of subject-less sequences.
+        focus_variants = list(self.focus_variants.get(entry.path, []))
+        if not focus_variants and focus_objects.enabled(getattr(self.config, "focus", None)):
+            missing = [model.id for model in self.focus_models()]
+            if missing:
+                outcome.warnings.append(
+                    "no focus object could be staged for this scene; it is generated "
+                    "without any: " + ", ".join(missing)
+                )
+                self.logger.warning("scene %s: %s", scene_name, outcome.warnings[-1])
+
         generator = SequenceGenerator(
             self.config,
             output_root=self.output_root,
@@ -400,22 +542,49 @@ class BatchRunner:
             task=self.task,
             project_layout=self.project_layout,
         )
+        outcome.character_status = provider.status()
+        camera_names = [obj.name for obj in selected]
+        self.logger.info(
+            "scene %s: %d camera(s) x %d motion(s) x %d character variant(s) x %d focus "
+            "object(s)",
+            scene_name, len(selected), len(library), len(variants),
+            len(focus_variants) or 1,
+        )
+
+        # One pass per focus object: its copy holds one subject, so the file has to be
+        # the one that is open while its sequences are generated.  The requests of all
+        # passes are built together, because the numbering of a motion folder counts
+        # across the objects.
         requests = generator.build_requests(
             entry,
             library=library,
-            cameras=[obj.name for obj in selected],
+            cameras=camera_names,
             character_variants=variants,
+            focus_variants=focus_variants,
         )
         outcome.request_count = len(requests)
-        self.logger.info(
-            "scene %s: %d camera(s) x %d motion(s) x %d character variant(s) = %d sequence(s)",
-            scene_name, len(selected), len(library), len(variants), len(requests),
-        )
 
-        outcome.character_status = provider.status()
+        opened = entry.path
         for request in requests:
             if self.task.cancelled:
                 break
+            if os.path.normcase(request.scene_entry.path) != os.path.normcase(opened):
+                # A different subject's copy: open it and keep generating.
+                switch = open_scene_for_generation(
+                    request.scene_entry,
+                    safe_copy=False,
+                    scratch_dir=os.path.join(self.project_root or self.output_root, "_scratch"),
+                )
+                if not switch.ok:
+                    outcome.failed += 1
+                    self.logger.error("cannot open %s: %s", request.scene_entry.path,
+                                      switch.error)
+                    continue
+                opened = request.scene_entry.path
+                self.logger.info(
+                    "focus object %r: generating from %s", request.focus,
+                    os.path.basename(opened),
+                )
             try:
                 result = generator.generate(request)
             except TaskCancelled:
@@ -548,6 +717,14 @@ class BatchRunner:
             )
         except Exception as exc:
             report.warnings.append(f"could not write batch_report.json: {exc}")
+            # Same rule as the per-sequence reports: a clean run does not need a
+            # roll-up file nobody reads (keep_reports forces it).
+            if not bool(getattr(self.config.batch, "keep_reports", False)) \
+                    and not report.errors and not getattr(report, "failed", 0):
+                try:
+                    os.remove(os.path.join(self.output_root, "batch_report.json"))
+                except OSError:
+                    pass
 
         if not report.ok:
             failed_scenes = [s for s in report.scenes if not s.ok and not s.skipped]
@@ -580,6 +757,7 @@ class BatchRunner:
                         "camera_selection": self.camera_selection,
                         "generator_version": GENERATOR_VERSION,
                         "render_input_root": to_forward_slashes(self.output_root),
+                        "asset_pack": self.asset_pack_summary(),
                     },
                     blender_version=_blender_version(),
                 )
@@ -587,6 +765,28 @@ class BatchRunner:
                 report.warnings.append(f"could not finalise the project folder: {exc}")
 
     # -- static helpers --------------------------------------------------
+    def asset_pack_summary(self) -> dict:
+        """What the run embedded into the scene copies (``project.json: asset_pack``)."""
+        packed = sum(int(record.get("packed_count") or 0) for record in self.asset_packs)
+        missing = sum(int(record.get("missing_count") or 0) for record in self.asset_packs)
+        return {
+            "scenes": len(self.asset_packs),
+            "packed_files": packed,
+            "missing_files": missing,
+            "records": [
+                {
+                    "path": record.get("path", ""),
+                    "ok": bool(record.get("ok")),
+                    "packed": int(record.get("packed_count") or 0),
+                    "missing": int(record.get("missing_count") or 0),
+                    "note": record.get("note", ""),
+                    "error": record.get("error", ""),
+                    "report": record.get("report", ""),
+                }
+                for record in self.asset_packs
+            ],
+        }
+
     @staticmethod
     def inspect_output_tree(output_root: str) -> dict:
         """Summarise what already exists under ``output_root``."""

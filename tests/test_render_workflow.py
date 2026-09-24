@@ -495,6 +495,16 @@ def build_suite() -> Suite:
                 ok(os.path.getsize(video) > 0, video)
                 equal(os.path.basename(video).count("-"), 0,
                       "Blender's frame-range suffix must have been normalised away")
+                # The per-sequence log is what a person reads first on a render node, so
+                # it has to agree with the report.  It said "status: failed" next to a
+                # finished video until the ok flag was set *before* the log was written
+                # instead of one statement after it.
+                log_path = stem + "_render_log.txt"
+                ok(os.path.isfile(log_path), log_path)
+                with open(log_path, encoding="utf-8") as handle:
+                    log_text = handle.read()
+                ok("status           : ok" in log_text,
+                   f"{os.path.basename(log_path)} must report ok:\n{log_text}")
             ok(os.path.isfile(os.path.join(output, "panel_render.log")), "render log")
             stray = [n for n in os.listdir(output) if n.startswith(".panel_render_")]
             equal(stray, [], "the scratch report must be cleaned up")

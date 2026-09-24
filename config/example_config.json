@@ -7,6 +7,7 @@
     "overwrite": false,
     "resume": true,
     "save_validation_report": true,
+    "keep_reports": false,
     "verbose": true,
     "character_asset_root": "",
     "animation_asset_root": "",
@@ -118,6 +119,40 @@
     "duration_min": 2.0,
     "duration_max": 6.0,
     "sequences_per_camera": 2
+  },
+  "region": {
+    "mode": "off",
+    "object_name": "",
+    "center": [0.0, 0.0, 0.0],
+    "size": [8.0, 8.0, 4.0],
+    "rotation": [0.0, 0.0, 0.0],
+    "margin_percent": 25.0,
+    "inset": 0.0,
+    "helper_object": "",
+    "margin": 0.25,
+    "attempts": [8, 8, 4, 3],
+    "strict": false
+  },
+  "focus": {
+    "mode": "off",
+    "models": [
+      {
+        "id": "",
+        "path": "E:/models/chair.blend",
+        "label": "chair",
+        "object_name": "",
+        "scale": 1.0,
+        "rotation": [0.0, 0.0, 0.0],
+        "enabled": true
+      }
+    ],
+    "anchor_mode": "auto",
+    "anchor_object": "MPP_FocusAnchor",
+    "anchor_location": [0.0, 0.0, 0.0],
+    "anchor_clearance": 0.5,
+    "keep_visible": true,
+    "visible_ratio": 0.95,
+    "strict": false
   },
   "scenes": [
     {

@@ -54,12 +54,18 @@ SKIP_DEBUG_SCAN = {
     "probe_sequence_accuracy.py",
     "probe_settings_persistence.py",
     "probe_template_contract.py",    # a probe reports what it measured
+    "probe_trajectory_speed.py",     # a probe reports what it measured
     "smoke_render.py",
     "motion_pipeline_cli.py",
     "render_sequences.py",
     "pack_textures.py",          # a standalone command-line tool: printing is its UI
     "migrate_unreal_templates.py",   # a standalone migration tool: same
     "make_atomic_templates.py",      # a standalone document generator: same
+    "make_41_templates.py",          # a standalone document generator: same
+    "place_focus_objects.py",        # a standalone staged-copy tool: same
+    "inspect_scene.py",              # the 41-shot skill's measuring tool: printing is its UI
+    "make_run_config.py",            # the 41-shot skill's driver: same
+    "verify_run.py",                 # the 41-shot skill's checker: same
     "operators.py",
     "test_blender_integration.py",
     "test_render_workflow.py",   # reports fixture setup

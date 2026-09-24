@@ -491,6 +491,63 @@ def build_suite() -> Suite:
         )
         equal([c.to_dict() for c in repeat.accepted], [c.to_dict() for c in result.accepted])
 
+    @suite.case("search refuses a candidate that loses the subject")
+    def _():
+        boxes = _wall_boxes() + [_blocker()]
+        context = _context(boxes)
+        config = ValidationSection(sample_step=100, clearance=0.4)
+        search_config = SearchSection(
+            enabled=True, min_radius=1.0, max_radius=4.0, candidate_count=48,
+            azimuth_samples=12, elevation_samples=5, max_retries=1, random_seed=3,
+            allow_rotation_adjust=False, allow_focal_adjust=False, max_output_candidates=1,
+        )
+        validator = cv.CameraValidator(context, config)
+        camera = context.cameras[0]
+
+        def make_animation(candidate):
+            sample = _point_camera(candidate.position, (1.0, 0.0, 0.0))
+            return _animation([sample])
+
+        def run(veto=None):
+            return cs.CameraSearch(context, search_config, validator).search(
+                camera, make_animation,
+                base_position=(-1.0, 0.0, 1.6),
+                base_quaternion=cs.look_at_quaternion((1.0, 0.0, 0.0)),
+                base_focal=35.0,
+                veto=veto,
+            )
+
+        reason = "focus_object_lost: 0/1 frame(s) show 'chair'"
+
+        def veto(candidate, animation):
+            return reason
+
+        result = run(veto)
+        ok(not result.passed, "a vetoed candidate must not be accepted")
+        equal(result.accepted, [])
+        vetoed = [e for e in result.evaluations if e.rejected_reason]
+        ok(vetoed, "the refusal must be recorded on the evaluation")
+        # The geometry was fine -- it is the subject that was missing.
+        ok(vetoed[0].report.passed, "the refused candidate passed the geometry checks")
+        ok(not vetoed[0].passed, "a refused candidate does not count as passing")
+        payload = vetoed[0].to_dict()
+        equal(payload["accepted"], False)
+        equal(payload["rejected_reason"], reason)
+        ok(any(reason in message for message in result.messages), result.messages)
+        ok(reason in result.rounds[0]["top_reasons"], result.rounds[0]["top_reasons"])
+
+        # Without the veto the very same search does find a position: the veto is
+        # what changed the outcome, not a bad candidate set.
+        plain = run(None)
+        ok(plain.passed, f"the same search must succeed without the veto: {plain.messages}")
+        ok(not any(e.rejected_reason for e in plain.evaluations))
+
+        def broken(candidate, animation):
+            raise RuntimeError("boom")
+
+        recovered = run(broken)
+        ok(recovered.passed, "a veto that raises must not kill the search")
+
     @suite.case("search reports failure honestly when every candidate is bad")
     def _():
         # A tiny sealed box: no camera position can be valid.

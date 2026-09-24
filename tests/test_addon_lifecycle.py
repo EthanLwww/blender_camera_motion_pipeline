@@ -36,7 +36,8 @@ from blender_motion_pipeline.tests.harness import Suite, equal, ok  # noqa: E402
 #: Every panel the add-on declares.
 EXPECTED_PANELS = (
     "MPP_PT_scenes", "MPP_PT_character", "MPP_PT_motion", "MPP_PT_validation",
-    "MPP_PT_output", "MPP_PT_actions", "MPP_PT_status", "MPP_UL_scene_list",
+    "MPP_PT_output", "MPP_PT_region", "MPP_PT_focus", "MPP_PT_actions", "MPP_PT_status",
+    "MPP_UL_scene_list", "MPP_UL_focus_list",
 )
 
 #: Every operator the panels reference.
@@ -46,6 +47,8 @@ EXPECTED_OPERATORS = (
     "start_generation", "stop_task", "open_output_directory", "show_error_report",
     "load_templates", "apply_defaults", "save_config", "load_config",
     "save_settings", "load_settings", "forget_settings",
+    "focus_add_model", "focus_add_directory", "focus_remove", "focus_clear",
+    "focus_move_up", "focus_move_down", "focus_auto_anchor",
 )
 
 

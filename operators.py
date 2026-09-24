@@ -314,8 +314,260 @@ class MPP_OT_clear_list(_MPPBase, Operator):
         return self.report_outcome(group, f"Cleared {count} scene(s)")
 
 
+# --------------------------------------------------------------------------
+# focus models
+# --------------------------------------------------------------------------
+def _focus_row(item) -> dict:
+    """One focus list row as plain values (used to reorder the collection)."""
+    return {
+        "path": item.path,
+        "enabled": bool(item.enabled),
+        "name": item.name,
+        "object_name": item.object_name,
+        "scale": float(item.scale),
+        "rotation": [float(value) for value in item.rotation],
+        "status": item.status,
+        "note": item.note,
+    }
+
+
+def _write_focus_row(item, row: dict) -> None:
+    item.path = row.get("path", "")
+    item.enabled = bool(row.get("enabled", True))
+    item.name = row.get("name", "")
+    item.object_name = row.get("object_name", "")
+    item.scale = float(row.get("scale", 1.0))
+    item.rotation = list(row.get("rotation") or [0.0, 0.0, 0.0])
+    item.status = row.get("status", "pending")
+    item.note = row.get("note", "")
+
+
+def _focus_add_paths(group, paths) -> "tuple[int, list[str]]":
+    """Add model files to the focus list, skipping duplicates."""
+    known = {os.path.normcase(normalize_path(item.path)) for item in group.focus_list if item.path}
+    added = 0
+    problems: "list[str]" = []
+    for path in paths:
+        candidate = normalize_path(path)
+        if not os.path.isfile(candidate):
+            problems.append(f"not a file: {to_forward_slashes(candidate)}")
+            continue
+        if os.path.normcase(candidate) in known:
+            problems.append(f"already in the list: {to_forward_slashes(candidate)}")
+            continue
+        item = group.focus_list.add()
+        item.path = candidate
+        item.enabled = True
+        item.name = os.path.splitext(os.path.basename(candidate))[0]
+        item.status = "pending"
+        known.add(os.path.normcase(candidate))
+        added += 1
+    if group.focus_list_index < 0 and len(group.focus_list):
+        group.focus_list_index = 0
+    return added, problems
+
+
+class MPP_OT_focus_add_model(_MPPBase, Operator):
+    """Add a .blend model as a focus object"""
+
+    bl_idname = "mpp.focus_add_model"
+    bl_label = "Add model"
+
+    filepath: bpy.props.StringProperty(name="Model file", default="")
+    files: bpy.props.CollectionProperty(
+        name="Files",
+        type=bpy.types.OperatorFileListElement,
+        options={"HIDDEN", "SKIP_SAVE"},
+    )
+    directory: bpy.props.StringProperty(name="Directory", subtype="DIR_PATH", default="")
+    filter_glob: bpy.props.StringProperty(default="*.blend", options={"HIDDEN"})
+
+    def invoke(self, context, event):
+        context.window_manager.fileselect_add(self)
+        return {"RUNNING_MODAL"}
+
+    def execute(self, context):
+        group = _group(context)
+        candidates = []
+        if self.files:
+            base = self.directory or os.path.dirname(self.filepath or "")
+            candidates.extend(os.path.join(base, item.name) for item in self.files)
+        if self.filepath:
+            candidates.append(self.filepath)
+        if not candidates and group.focus_file:
+            candidates.append(group.focus_file)
+        if not candidates:
+            return self.fail(
+                group,
+                "No model selected. Use the picker or fill the Model file field.",
+            )
+        added, problems = _focus_add_paths(group, candidates)
+        for problem in problems:
+            LOGGER.warning("%s", problem)
+        if not added:
+            return self.fail(group, problems[0] if problems else "Nothing was added")
+        return self.report_outcome(
+            group,
+            f"Added {added} focus model(s); {len(group.focus_list)} in the list"
+            + (f" | {problems[0]}" if problems else ""),
+        )
+
+
+class MPP_OT_focus_add_directory(_MPPBase, Operator):
+    """Scan a folder for .blend models and add them as focus objects"""
+
+    bl_idname = "mpp.focus_add_directory"
+    bl_label = "Add model folder"
+
+    directory: bpy.props.StringProperty(name="Directory", subtype="DIR_PATH", default="")
+
+    def invoke(self, context, event):
+        context.window_manager.fileselect_add(self)
+        return {"RUNNING_MODAL"}
+
+    def execute(self, context):
+        group = _group(context)
+        target = self.directory or group.focus_directory
+        if not target:
+            return self.fail(
+                group, "No folder selected. Use the picker or fill the Model folder field."
+            )
+        try:
+            found = scan_directory(target, recursive=group.recursive_scan)
+        except NotADirectoryError as exc:
+            return self.fail(group, str(exc))
+        except Exception as exc:
+            return self.fail(group, "Could not scan the folder", exception=exc)
+        if not found:
+            return self.fail(group, f"No .blend models found in {to_forward_slashes(target)}")
+        added, problems = _focus_add_paths(group, found)
+        return self.report_outcome(
+            group,
+            f"Found {len(found)}, added {added} focus model(s) from "
+            f"{to_forward_slashes(target)}"
+            + (f" | {len(problems)} skipped" if problems else ""),
+        )
+
+
+class MPP_OT_focus_remove(_MPPBase, Operator):
+    """Remove the selected focus model from the list"""
+
+    bl_idname = "mpp.focus_remove"
+    bl_label = "Remove model"
+
+    def execute(self, context):
+        group = _group(context)
+        index = group.focus_list_index
+        if index < 0 or index >= len(group.focus_list):
+            return self.fail(group, "Select a focus model in the list first")
+        removed = group.focus_list[index].label()
+        group.focus_list.remove(index)
+        group.focus_list_index = min(index, len(group.focus_list) - 1)
+        return self.report_outcome(group, f"Removed focus model {removed}")
+
+
+class MPP_OT_focus_clear(_MPPBase, Operator):
+    """Clear the focus model list"""
+
+    bl_idname = "mpp.focus_clear"
+    bl_label = "Clear models"
+
+    def execute(self, context):
+        group = _group(context)
+        count = len(group.focus_list)
+        group.focus_list.clear()
+        group.focus_list_index = -1
+        return self.report_outcome(group, f"Cleared {count} focus model(s)")
+
+
+class _MPP_FocusMove(_MPPBase, Operator):
+    """Move the selected focus model one row up or down."""
+
+    direction = 0
+
+    def execute(self, context):
+        group = _group(context)
+        index = group.focus_list_index
+        if index < 0 or index >= len(group.focus_list):
+            return self.fail(group, "Select a focus model in the list first")
+        target = index + self.direction
+        if target < 0 or target >= len(group.focus_list):
+            return self.report_outcome(group, "The model is already at the end of the list")
+        rows = [_focus_row(item) for item in group.focus_list]
+        rows[index], rows[target] = rows[target], rows[index]
+        group.focus_list.clear()
+        for row in rows:
+            _write_focus_row(group.focus_list.add(), row)
+        group.focus_list_index = target
+        return self.report_outcome(
+            group, f"Moved {rows[target].get('name') or 'the model'} to row {target + 1}"
+        )
+
+
+class MPP_OT_focus_move_up(_MPP_FocusMove):
+    """Move the selected focus model up"""
+
+    bl_idname = "mpp.focus_move_up"
+    bl_label = "Move model up"
+    direction = -1
+
+
+class MPP_OT_focus_move_down(_MPP_FocusMove):
+    """Move the selected focus model down"""
+
+    bl_idname = "mpp.focus_move_down"
+    bl_label = "Move model down"
+    direction = 1
+
+
+class MPP_OT_focus_auto_anchor(_MPPBase, Operator):
+    """Put the anchor point in the most open spot of this scene"""
+
+    bl_idname = "mpp.focus_auto_anchor"
+    bl_label = "Auto place anchor"
+
+    def execute(self, context):
+        from .core import focus as focus_objects
+
+        group = _group(context)
+        scene = getattr(context, "scene", None)
+        if scene is None:
+            return self.fail(group, "No scene is open")
+        name = group.focus_anchor_object.strip() or focus_objects.DEFAULT_ANCHOR_OBJECT
+        try:
+            result = focus_objects.auto_anchor(
+                scene, clearance=float(group.focus_anchor_clearance), logger=LOGGER
+            )
+        except Exception as exc:
+            return self.fail(group, "Could not work out where the anchor should go",
+                             exception=exc)
+        location = [float(value) for value in result.get("location") or (0.0, 0.0, 0.0)]
+        anchor = scene.objects.get(name) if hasattr(scene.objects, "get") else None
+        if anchor is None:
+            # Built through the data API rather than bpy.ops so it works from any
+            # context (a text editor, a script, a background run), not only a viewport.
+            anchor = bpy.data.objects.new(name, None)
+            anchor.empty_display_type = "PLAIN_AXES"
+            anchor.empty_display_size = 0.5
+            scene.collection.objects.link(anchor)
+        anchor.location = location
+        try:
+            anchor[focus_objects.SCENE_ANCHOR_KEY] = "auto"
+        except Exception:  # noqa: BLE001 - custom properties are best effort
+            pass
+        group.focus_anchor_object = name
+        group.focus_anchor_mode = "object"
+        group.focus_anchor_location = location
+        message = (
+            f"Anchor {name} placed at "
+            f"({location[0]:.2f}, {location[1]:.2f}, {location[2]:.2f})"
+        )
+        if result.get("note"):
+            message += f" | {result['note']}"
+        return self.report_outcome(group, message, level="WARNING" if result.get("note") else "INFO")
+
+
 class MPP_OT_save_scene_list(_MPPBase, Operator):
-    """Save the scene list to a JSON file"""
 
     bl_idname = "mpp.save_scene_list"
     bl_label = "Save list"
@@ -1499,6 +1751,13 @@ CLASSES = (
     MPP_OT_add_directory,
     MPP_OT_remove_selected,
     MPP_OT_clear_list,
+    MPP_OT_focus_add_model,
+    MPP_OT_focus_add_directory,
+    MPP_OT_focus_remove,
+    MPP_OT_focus_clear,
+    MPP_OT_focus_move_up,
+    MPP_OT_focus_move_down,
+    MPP_OT_focus_auto_anchor,
     MPP_OT_save_scene_list,
     MPP_OT_load_scene_list,
     MPP_OT_save_config,
